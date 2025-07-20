@@ -10,7 +10,7 @@ CustomParHelper: CustomParHelper = next(d for d in me.docked if 'ExtUtils' in d.
 # 	if parent.NDIInfo.par.Debugmessages.eval():
 # 		tdu.debug.debug(message)
 
-class NamedSwitcherInfoExt:
+class NDINamedRouterInfoExt:
 	def __init__(self, ownerComp):
 		CustomParHelper.Init(self, ownerComp, enable_properties=True, enable_callbacks=True)
 		self.ownerComp = ownerComp

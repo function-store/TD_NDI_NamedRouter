@@ -4,7 +4,7 @@
 def getExtension():
 	"""Get the extension instance"""
 	try:
-		return ext.NamedSwitcherInfoExt
+		return ext.NDINamedRouterInfoExt
 	except:
 		return None
 

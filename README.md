@@ -13,13 +13,13 @@ A web-based GUI for controlling NDI source assignments in TouchDesigner using **
 - **Visual feedback** - shows current source assignments and regex patterns
 - **Cross-platform** - works on any device with a web browser
 - **Lightweight extension** - focused only on NDI switching logic
-- **Client Info Component** - `NDI_NamedSwitcher_INFO` component for accessing server data from other TouchDesigner projects
+- **Client Info Component** - `NDI_NamedRouter_INFO` component for accessing server data from other TouchDesigner projects
 
 ## Setup
 
 ### 1. Setup TouchDesigner Component
 
-1. **Add the component**: Place `NDI_NamedSwitcher.tox` in your TouchDesigner proejct
+1. **Add the component**: Place `NDI_NamedRouter.tox` in your TouchDesigner proejct
 2. **Configure**: configure it to listen on port 8080, or whichever port you've set websocket port in the server
 
 ### 2. Start the Web Server
@@ -257,9 +257,9 @@ Plural handling is enabled by default, however if you wish to disable it you can
 - **WebSocket DAT**: Check the WebSocket DAT's monitor for connection status and messages
 - **Web Server**: Check that the server is running and accessible on the displayed URLs
 
-## NDI_NamedSwitcher_INFO Component
+## NDI_NamedRouter_INFO Component
 
-The `NDI_NamedSwitcher_INFO` component is a TouchDesigner client that connects to the NDI Named Switcher server to access output information from other TouchDesigner projects.
+The `NDI_NamedRouter_INFO` component is a TouchDesigner client that connects to the NDI Named Switcher server to access output information from other TouchDesigner projects.
 
 ### Purpose
 
@@ -275,7 +275,7 @@ It is suggested to have one of this component in your network as it has a Global
 #### Basic Access
 ```python
 # Get the extension
-ext = op.NDI_INFO.ext.NamedSwitcherInfoExt
+ext = op.NDI_INFO.ext.NamedRouterInfoExt
 
 # Check connection status
 if ext.isConnected():
@@ -320,7 +320,7 @@ available_sources = ext.getAvailableSources() # All available NDI sources
 
 ### Setup Instructions
 
-1. **Add Component**: Place the `NDI_NamedSwitcher_INFO` component in your TouchDesigner project
+1. **Add Component**: Place the `NDI_NamedRouter_INFO` component in your TouchDesigner project
 2. **Configure Connection**: The WebSocketDAT should connect to `localhost:8080` (or your server's address/port)
 3. **Automatic Connection**: The component will automatically connect and request data when initialized
 4. **Access Data**: Use `ext.Outputs.outputname` or `ext.ownerComp.Info['Output Name']` to access information, or `op.NDI_INFO.Outputs.projector.resx`

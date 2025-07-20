@@ -1,3 +1,9 @@
+'''Info Header Start
+Name : webserver1_callbacks
+Author : Dan@DAN-4090
+Saveorigin : NDI_NamedRouter.1.toe
+Saveversion : 2023.11880
+Info Header End'''
 # WebServer DAT callbacks for NDI Named Switcher
 # This file should be attached to a WebServer DAT in TouchDesigner
 # Configure the WebServer DAT to handle WebSocket connections
@@ -22,7 +28,7 @@ import time
 # return the response dictionary
 
 def debug(message):
-	if parent.NDINamedSwitcher.par.Debugmessages.eval():
+	if parent.NDINamedRouter.par.Debugmessages.eval():
 		tdu.debug.debug(message)
 
 def onHTTPRequest(webServerDAT, request, response):
@@ -36,7 +42,7 @@ def onWebSocketOpen(webServerDAT, client, uri):
 	debug(f'Web client connected to WebServer DAT')
 	
 	# Use the handler to send initial state and track client
-	_ext = ext.NDINamedSwitcherExt
+	_ext = ext.NDINamedRouterExt
 	if _ext and _ext.webHandler:
 		_ext.webHandler.addClient(client)
 		_ext.webHandler.sendInitialState(webServerDAT, client)
@@ -50,7 +56,7 @@ def onWebSocketClose(webServerDAT, client):
 	debug('Web client disconnected from WebServer DAT')
 	
 	# Remove client from handler's tracking
-	_ext = ext.NDINamedSwitcherExt
+	_ext = ext.NDINamedRouterExt
 	if _ext and _ext.webHandler:
 		_ext.webHandler.removeClient(client)
 	
@@ -59,7 +65,7 @@ def onWebSocketClose(webServerDAT, client):
 async def parseJSON(message, webServerDAT, client):
 	"""Parse JSON messages from web clients"""
 	# Use the handler to process the message
-	_ext = ext.NDINamedSwitcherExt
+	_ext = ext.NDINamedRouterExt
 	if _ext and _ext.webHandler:
 		_ext.webHandler.handleMessage(webServerDAT, client, message)
 	else:

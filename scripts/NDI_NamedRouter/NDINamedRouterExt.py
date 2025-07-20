@@ -1,3 +1,9 @@
+'''Info Header Start
+Name : NDINamedRouterExt
+Author : Dan@DAN-4090
+Saveorigin : NDI_NamedRouter.1.toe
+Saveversion : 2023.11880
+Info Header End'''
 import re
 import json
 import time
@@ -6,10 +12,10 @@ CustomParHelper: CustomParHelper = next(d for d in me.docked if 'ExtUtils' in d.
 ####
 
 def debug(message):
-	if parent.NDINamedSwitcher.par.Debugmessages.eval():
+	if parent.NDINamedRouter.par.Debugmessages.eval():
 		tdu.debug.debug(message)
 
-class NDINamedSwitcherExt:
+class NDINamedRouterExt:
 	def __init__(self, ownerComp):
 		CustomParHelper.Init(self, ownerComp, enable_properties=True, enable_callbacks=True)
 		self.ownerComp = ownerComp
