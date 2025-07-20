@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NDI Named Switcher Control</title>
+    <!-- Using native WebSocket API - no external dependencies needed -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(30, 30, 45, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(45deg, #2d3748, #4a5568);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .connection-status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.connected {
+            background: rgba(76, 175, 80, 0.8);
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(244, 67, 54, 0.8);
+            color: white;
+        }
+
+        .controls {
+            padding: 30px;
+        }
+
+        .control-section {
+            margin-bottom: 40px;
+        }
+
+        .control-section h2 {
+            color: #63b3ed;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            border-bottom: 2px solid #63b3ed;
+            padding-bottom: 10px;
+        }
+
+        .blocks-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .block-card {
+            background: #2d3748;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 2px solid #4a5568;
+            transition: all 0.3s ease;
+        }
+
+        .block-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+            border-color: #63b3ed;
+        }
+
+        .block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .block-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #e0e0e0;
+        }
+
+        .regex-pattern {
+            background: #4a5568;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #a0aec0;
+        }
+
+        .resolution-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #2d3748;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border: 1px solid #4a5568;
+        }
+
+        .resolution-label {
+            font-weight: 600;
+            color: #a0aec0;
+            font-size: 0.9em;
+        }
+
+        .resolution-value {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #63b3ed;
+            font-size: 1em;
+        }
+
+        .source-selector {
+            margin-bottom: 15px;
+        }
+
+        .source-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #a0aec0;
+        }
+
+        .source-selector select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #4a5568;
+            border-radius: 10px;
+            font-size: 1em;
+            background: #2d3748;
+            color: #e0e0e0;
+            transition: border-color 0.3s ease;
+        }
+
+        .source-selector select:focus {
+            outline: none;
+            border-color: #63b3ed;
+            box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.2);
+        }
+
+        .current-source {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .current-source.empty {
+            background: #f44336;
+        }
+
+        .refresh-button {
+            background: linear-gradient(45deg, #3182ce, #2c5282);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(49, 130, 206, 0.3);
+        }
+
+        .refresh-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(49, 130, 206, 0.4);
+        }
+
+        .last-update {
+            text-align: center;
+            color: #a0aec0;
+            font-size: 0.9em;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #4a5568;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #a0aec0;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #63b3ed;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .author-credit {
+            text-align: center;
+            padding: 20px;
+            border-top: 1px solid #4a5568;
+            margin-top: 20px;
+        }
+
+        .author-credit a {
+            color: #63b3ed;
+            text-decoration: none;
+            font-size: 0.9em;
+            transition: color 0.3s ease;
+        }
+
+        .author-credit a:hover {
+            color: #90cdf4;
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .blocks-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .connection-status {
+                position: static;
+                margin-top: 10px;
+                display: inline-block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>NDI Named Switcher Control</h1>
+            <div class="connection-status" id="connectionStatus">Connecting...</div>
+        </div>
+
+        <div class="controls">
+            <div class="control-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2>Source Controls</h2>
+                    <button class="refresh-button" onclick="refreshSources()">Refresh Sources</button>
+                </div>
+                
+                <div id="blocksContainer" class="blocks-container">
+                    <div class="loading">Loading source blocks...</div>
+                </div>
+            </div>
+
+            <div class="last-update" id="lastUpdate">
+                Waiting for data...
+            </div>
+            
+            <div class="author-credit">
+                <a href="https://functionstore.xyz/link-in-bio" target="_blank" rel="noopener noreferrer">
+                    Author: Function Store
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentState = {};
+        let reconnectInterval = null;
+        
+        // Use the same host as the web page for WebSocket connection
+        const WS_HOST = window.location.hostname;
+        const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port
+        const WS_URL = `ws://${WS_HOST}:${WS_PORT}`;
+        
+        console.log(`WebSocket URL: ${WS_URL}`);
+
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(WS_URL);
+                
+                ws.onopen = function() {
+                    console.log('Connected to TouchDesigner WebSocket');
+                    updateConnectionStatus(true);
+                    clearInterval(reconnectInterval);
+                    
+                    // Request current state
+                    sendMessage({ action: 'request_state' });
+                };
+                
+                ws.onclose = function() {
+                    console.log('Disconnected from TouchDesigner WebSocket');
+                    updateConnectionStatus(false);
+                    
+                    // Attempt to reconnect every 3 seconds
+                    if (!reconnectInterval) {
+                        reconnectInterval = setInterval(connectWebSocket, 3000);
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus(false);
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('Received from TouchDesigner:', data);
+                        handleMessage(data);
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                    }
+                };
+            } catch (error) {
+                console.error('Error connecting to WebSocket:', error);
+                updateConnectionStatus(false);
+            }
+        }
+
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+            } else {
+                console.warn('WebSocket not connected, cannot send message');
+            }
+        }
+
+        function handleMessage(data) {
+            if (data.action === 'state_update') {
+                currentState = data.state;
+                updateUI();
+            } else if (data.action === 'source_changed') {
+                // Handle individual source changes
+                if (data.block_idx !== undefined && data.source_name !== undefined) {
+                    if (currentState.current_sources) {
+                        currentState.current_sources[data.block_idx] = data.source_name;
+                        updateUI();
+                    }
+                }
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusElement = document.getElementById('connectionStatus');
+            if (connected) {
+                statusElement.textContent = 'Connected';
+                statusElement.className = 'connection-status connected';
+            } else {
+                statusElement.textContent = 'Disconnected';
+                statusElement.className = 'connection-status disconnected';
+            }
+        }
+
+        function updateUI() {
+            const container = document.getElementById('blocksContainer');
+            const lastUpdateElement = document.getElementById('lastUpdate');
+            
+            if (!currentState.output_names || currentState.output_names.length === 0) {
+                container.innerHTML = '<div class="loading">No source blocks configured</div>';
+                return;
+            }
+
+            let html = '';
+            
+            for (let i = 0; i < currentState.output_names.length; i++) {
+                const outputName = currentState.output_names[i] || `Block ${i + 1}`;
+                const regexPattern = currentState.regex_patterns[i] || 'No pattern';
+                const currentSource = currentState.current_sources[i] || '';
+                const resolution = currentState.output_resolutions && currentState.output_resolutions[i] ? currentState.output_resolutions[i] : [0, 0];
+                const resolutionText = resolution[0] > 0 && resolution[1] > 0 ? `${resolution[0]} × ${resolution[1]}` : 'Not set';
+                
+                html += `
+                    <div class="block-card">
+                        <div class="block-header">
+                            <div class="block-title">${outputName}</div>
+                            <div class="regex-pattern">${regexPattern}</div>
+                        </div>
+                        
+                        <div class="resolution-info">
+                            <span class="resolution-label">Resolution:</span>
+                            <span class="resolution-value">${resolutionText}</span>
+                        </div>
+                        
+                        <div class="source-selector">
+                            <label for="source-${i}">Select NDI Source:</label>
+                            <select id="source-${i}" onchange="setSource(${i}, this.value)">
+                                <option value="">-- Select Source --</option>
+                                ${currentState.sources.map(source => 
+                                    `<option value="${source}" ${source === currentSource ? 'selected' : ''}>${source}</option>`
+                                ).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="current-source ${currentSource ? '' : 'empty'}">
+                            Current: ${currentSource || 'No source selected'}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+            
+            // Update last update time
+            if (currentState.last_update) {
+                const updateTime = new Date(currentState.last_update * 1000).toLocaleString();
+                lastUpdateElement.textContent = `Last updated: ${updateTime}`;
+            }
+        }
+
+        function setSource(blockIdx, sourceName) {
+            console.log(`Setting source for block ${blockIdx}: ${sourceName}`);
+            sendMessage({
+                action: 'set_source',
+                block_idx: blockIdx,
+                source_name: sourceName
+            });
+        }
+
+        function refreshSources() {
+            console.log('Refreshing sources');
+            sendMessage({ action: 'refresh_sources' });
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            updateConnectionStatus(false);
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html> 
