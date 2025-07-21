@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple startup script for NDI Named Switcher Web Interface
+Simple startup script for NDI Named Router Web Interface
 Starts a static file server to serve the web interface
 """
 
@@ -148,7 +148,7 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="NDI Named Switcher Web Interface Server",
+        description="NDI Named Router Web Interface Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -194,7 +194,7 @@ def main():
     args = parse_arguments()
     
     print("=" * 60)
-    print("NDI Named Switcher Web Interface")
+    print("NDI Named Router Web Interface")
     print("Static File Server (No Dependencies Required)")
     print("=" * 60)
     

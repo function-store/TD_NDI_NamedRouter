@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.7.toe
+Saveorigin : NDI_NamedRouter.1.toe
 Saveversion : 2023.11880
 Info Header End'''
 import re
@@ -27,10 +27,10 @@ class NDINamedRouterExt:
 		# Initialize the WebSocket handler
 		self.webHandler = WebHandler(self)
 		
-		self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
-		self.seqSwitch[0].par.Currentsource.menuNames = self.sources
+		# self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
+		# self.seqSwitch[0].par.Currentsource.menuNames = self.sources
 		
-		debug(f'NDI Named Switcher Extension initialized with {len(self.sources)} sources')
+		debug(f'NDI Named Router Extension initialized with {len(self.sources)} sources')
 		debug(f'Plural handling: {"enabled" if self.enablePluralHandling else "disabled"}')
 
 	def transformPatternForPlurals(self, pattern):
@@ -83,8 +83,7 @@ class NDINamedRouterExt:
 
 	@property
 	def sources(self):
-		# list comprehension for backwards compatibility
-		return [_cell.val for _cell in self.ndiTable.col('sourceName')[1:]]
+		return self.ndiTable.col('sourceName',val=True)[1:]
 
 	@property
 	def outputResolutions(self):
@@ -234,14 +233,14 @@ class NDINamedRouterExt:
 	def onSourceAppeared(self, dat, _sources):
 		latestSource = _sources[0].sourceName
 		sources = [_source.sourceName for _source in _sources]
-		for _source in sources:
-			if _source not in self.seqSwitch[0].par.Currentsource.menuLabels:
-				labels = self.seqSwitch[0].par.Currentsource.menuLabels
-				names = self.seqSwitch[0].par.Currentsource.menuNames
-				labels.append(_source)
-				names.append(_source)
-				self.seqSwitch[0].par.Currentsource.menuLabels = labels
-				self.seqSwitch[0].par.Currentsource.menuNames = names
+		# for _source in sources:
+		# 	if _source not in self.seqSwitch[0].par.Currentsource.menuLabels:
+		# 		labels = self.seqSwitch[0].par.Currentsource.menuLabels
+		# 		names = self.seqSwitch[0].par.Currentsource.menuNames
+		# 		labels.append(_source)
+		# 		names.append(_source)
+		# 		self.seqSwitch[0].par.Currentsource.menuLabels = labels
+		# 		self.seqSwitch[0].par.Currentsource.menuNames = names
 		debug(f'updating menus with {sources} cause they appeared')
 		
 		# Extract latest source name from the callback parameter
@@ -258,15 +257,15 @@ class NDINamedRouterExt:
 
 
 	def onSourceDisappeared(self, dat, sources):
-		for _source in sources:
-			_source = _source.sourceName
-			if _source in self.seqSwitch[0].par.Currentsource.menuLabels:
-				labels = self.seqSwitch[0].par.Currentsource.menuLabels
-				names = self.seqSwitch[0].par.Currentsource.menuNames
-				labels.remove(_source)
-				names.remove(_source)
-				self.seqSwitch[0].par.Currentsource.menuLabels = labels
-				self.seqSwitch[0].par.Currentsource.menuNames = names
+		# for _source in sources:
+		# 	_source = _source.sourceName
+		# 	if _source in self.seqSwitch[0].par.Currentsource.menuLabels:
+		# 		labels = self.seqSwitch[0].par.Currentsource.menuLabels
+		# 		names = self.seqSwitch[0].par.Currentsource.menuNames
+		# 		labels.remove(_source)
+		# 		names.remove(_source)
+		# 		self.seqSwitch[0].par.Currentsource.menuLabels = labels
+		# 		self.seqSwitch[0].par.Currentsource.menuNames = names
 		debug(f'updating menus after sources disappeared')
 		
 		# Update source mapping after sources disappeared
@@ -398,7 +397,7 @@ class WebHandler:
 				debug('ERROR: Extension not found, sending error response')
 				error_response = {
 					'action': 'error',
-					'message': 'NDI Named Switcher extension not found'
+					'message': 'NDI Named Router extension not found'
 				}
 				webServerDAT.webSocketSendText(client, json.dumps(error_response))
 				return
@@ -504,3 +503,4 @@ class WebHandler:
 
 	def _outputResolution(self, block_idx):
 		return self.mapping[block_idx].par.Resx.eval(), self.mapping[block_idx].par.Resy.eval()
+

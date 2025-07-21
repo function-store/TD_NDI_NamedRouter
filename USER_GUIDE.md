@@ -1,8 +1,8 @@
-# NDI Named Switcher - User Guide
+# NDI Named Router - User Guide
 
 ## What It Does
 
-**The NDI Named Switcher is an automatic video routing system** that takes video sources from your network (via NDI) and intelligently sends them to the right display outputs - like projectors, LED walls, or TVs - without you having to manually configure each connection.
+**The NDI Named Router is an automatic video routing system** that takes video sources from your network (via NDI) and intelligently sends them to the right display outputs - like projectors, LED walls, or TVs - without you having to manually configure each connection.
 
 ## The Problem It Solves
 
@@ -93,7 +93,7 @@ The system automatically routes them to the right outputs without you having to 
 ## How to Access the System
 
 ### Automatic Startup
-- The NDI Named Switcher runs automatically on the **main media server** when the system starts up
+- The NDI Named Router runs automatically on the **main media server** when the system starts up
 - No manual intervention required - it's always running and monitoring for new sources
 
 ### Web Interface Access

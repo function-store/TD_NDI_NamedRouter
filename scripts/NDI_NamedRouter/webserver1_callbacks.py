@@ -4,7 +4,7 @@ Author : Dan@DAN-4090
 Saveorigin : NDI_NamedRouter.1.toe
 Saveversion : 2023.11880
 Info Header End'''
-# WebServer DAT callbacks for NDI Named Switcher
+# WebServer DAT callbacks for NDI Named Router
 # This file should be attached to a WebServer DAT in TouchDesigner
 # Configure the WebServer DAT to handle WebSocket connections
 
@@ -72,7 +72,7 @@ async def parseJSON(message, webServerDAT, client):
 		debug('WARNING: Extension or WebHandler not found')
 		error_response = {
 			'action': 'error',
-			'message': 'NDI Named Switcher extension or handler not found'
+			'message': 'NDI Named Router extension or handler not found'
 		}
 		webServerDAT.webSocketSendText(client, json.dumps(error_response))
 
@@ -105,10 +105,10 @@ def onWebSocketReceivePong(webServerDAT, client, data):
 
 def onServerStart(webServerDAT):
 	"""Called when the WebServer starts"""
-	debug(f'NDI Named Switcher WebServer started: {webServerDAT.name}')
+	debug(f'NDI Named Router WebServer started: {webServerDAT.name}')
 	return
 
 def onServerStop(webServerDAT):
 	"""Called when the WebServer stops"""
-	debug(f'NDI Named Switcher WebServer stopped: {webServerDAT.name}')
+	debug(f'NDI Named Router WebServer stopped: {webServerDAT.name}')
 	return

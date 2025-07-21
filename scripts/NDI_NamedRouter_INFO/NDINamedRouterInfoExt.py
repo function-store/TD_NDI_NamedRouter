@@ -6,9 +6,9 @@ from collections import namedtuple
 CustomParHelper: CustomParHelper = next(d for d in me.docked if 'ExtUtils' in d.tags).mod('CustomParHelper').CustomParHelper # import
 ###
 
-# def debug(message):
-# 	if parent.NDIInfo.par.Debugmessages.eval():
-# 		tdu.debug.debug(message)
+def debug(message):
+	if parent.NDIInfo.par.Debugmessages.eval():
+		tdu.debug.debug(message)
 
 class NDINamedRouterInfoExt:
 	def __init__(self, ownerComp):
@@ -36,7 +36,7 @@ class NDINamedRouterInfoExt:
 		# Create a named tuple for output info
 		self._outputInfo = namedtuple('OutputInfo', ['resx', 'resy'])
 		
-		debug('[NDI Info Ext] NDI Named Switcher Info Extension initialized')
+		debug('[NDI Info Ext] NDI Named Router Info Extension initialized')
 
 		run(
 			"args[0].postInit() if args[0] "
@@ -145,13 +145,13 @@ class NDINamedRouterInfoExt:
 	# WebSocket event handlers (called from websocket callbacks)
 	def onWebSocketConnect(self, dat):
 		"""Called when WebSocket connection is established"""
-		debug('[NDI Info Ext] Connected to NDI Named Switcher server')
+		debug('[NDI Info Ext] Connected to NDI Named Router server')
 		# Request initial state from server
 		self._requestState()
 	
 	def onWebSocketDisconnect(self, dat):
 		"""Called when WebSocket connection is closed"""
-		debug('[NDI Info Ext] Disconnected from NDI Named Switcher server')
+		debug('[NDI Info Ext] Disconnected from NDI Named Router server')
 	
 	def onWebSocketReceiveText(self, dat, message):
 		"""Called when text message is received from server"""

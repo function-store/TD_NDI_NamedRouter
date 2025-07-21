@@ -1,4 +1,4 @@
-# NDI Named Switcher - Quick Guide
+# NDI Named Router - Quick Guide
 
 ## What It Does
 **Automatically routes video sources to displays** based on source names. Name your sources with patterns like "laptop_projector", "wall_led", or "lobby_tv" and the system automatically sends them to the right outputs.

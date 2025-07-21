@@ -1,4 +1,4 @@
-# WebSocketDAT callbacks for NDI Named Switcher Info Service
+# WebSocketDAT callbacks for NDI Named Router Info Service
 # This file provides minimal bridge callbacks that forward events to the extension
 
 def getExtension():
