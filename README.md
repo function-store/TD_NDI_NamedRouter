@@ -33,7 +33,12 @@ The component matches NDI sources to outputs using intelligent pattern matching:
 - A source named "MyPC_Projector" automatically routes to output "Projector" (with default regex matching pattern of `.*_{Output Name}`)
 - "Something_LED" matches to output "LED" 
 - The latest matching source will take precedence
-- Manual override available through the component or web interface
+  
+The system automatically handles source name variations:
+- Pattern `camera` matches both "camera" and "cameras"
+- Pattern `projector` matches both "Projector" and "PROJECTORS"
+
+> Automatic matching can be overridden manually via the web interface
 
 ## User Guide
 
@@ -55,12 +60,6 @@ The component matches NDI sources to outputs using intelligent pattern matching:
 - Manually assign specific NDI sources to outputs via component parameters
 - Override automatic pattern matching when needed
 - Changes take effect immediately
-#### Smart Source Matching
-
-The system automatically handles source name variations:
-- Pattern `camera` matches both "camera" and "cameras"
-- Pattern `projector` matches both "projector" and "projectors"
-- Automatic matching can be overridden manually via the web interface
 
 ### Optional Web Interface
 
