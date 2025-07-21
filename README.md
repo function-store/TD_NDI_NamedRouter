@@ -2,7 +2,7 @@
 
 A TouchDesigner component for intelligent NDI source routing with smart name-based matching. Route any NDI input sources to video outputs with automatic pattern matching and optional web-based control.
 
-![NDI Named Router Interface](screenshot.png)
+![NDI Named Router Interface](https://github.com/function-store/TD_NDI_NamedRouter/blob/main/docs/web.jpg)
 *Optional web interface for remote control*
 
 ## What is NDI Named Router?
