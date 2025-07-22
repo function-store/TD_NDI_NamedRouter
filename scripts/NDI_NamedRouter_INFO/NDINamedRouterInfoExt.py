@@ -15,9 +15,13 @@ class NDINamedRouterInfoExt:
 		CustomParHelper.Init(self, ownerComp, enable_properties=True, enable_callbacks=True)
 		self.ownerComp = ownerComp
 		self.webSocket : websocketDAT = self.ownerComp.op('websocket1')
-		
+		self.timer = self.ownerComp.op('timer1')
 		# # Plural handling configuration
 		# self.enablePluralHandling = True
+
+		if self.isPeriodicUpdate or self.isUpdateOnStart:
+			self.timerActive = True
+			self.timer.par.start.pulse()
 
 		# Connection settings
 		self.autoReconnect = True
@@ -54,7 +58,41 @@ class NDINamedRouterInfoExt:
 	def seqSwitch(self):
 		return self.ownerComp.seq.Switch
 
+	@property
+	def isPeriodicUpdate(self):
+		return self.ownerComp.par.Update.eval()
 
+	@property
+	def isUpdateOnStart(self):
+		return self.ownerComp.par.Updateonstart.eval()
+	
+	@property
+	def timerActive(self):
+		return self.timer.par.play.eval()
+	
+	@timerActive.setter#####
+	def timerActive(self, value):
+		self.timer.par.play.val = value
+		if value:
+			self.timer.par.start.pulse()
+
+	def onParUpdate(self, val):
+		if not self.isUpdateOnStart and not val:
+			self.timerActive = False
+		elif val:
+			self.timerActive = True
+	
+	def onParUpdateonstart(self, val):
+		if not self.isPeriodicUpdate and not val:
+			self.timerActive = False
+		elif val:
+			self.timerActive = True
+
+	def onParRequest(self):
+		self.requestState()
+
+	def onTimerCycle(self):
+		self.refreshSources()
 	
 	def _updateOutputsProperty(self):
 		"""Update the Outputs attribute on the component"""
@@ -234,6 +272,8 @@ class NDINamedRouterInfoExt:
 			
 			# Final update of Outputs property after all outputs are processed
 			self._updateOutputsProperty()
+			if not self.isPeriodicUpdate and self.isUpdateOnStart:
+				self.timerActive = False
 			
 			debug('[NDI Info Ext] State update completed')
 			

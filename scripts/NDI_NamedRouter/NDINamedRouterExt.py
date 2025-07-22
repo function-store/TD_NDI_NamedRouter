@@ -1,12 +1,13 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.7.toe
-Saveversion : 2023.11880
+Saveorigin : NDI_NamedRouter.29.toe
+Saveversion : 2023.11340
 Info Header End'''
 import re
 import json
 import time
+from TDStoreTools import StorageManager
 
 CustomParHelper: CustomParHelper = next(d for d in me.docked if 'ExtUtils' in d.tags).mod('CustomParHelper').CustomParHelper # import
 ####
@@ -30,8 +31,18 @@ class NDINamedRouterExt:
 		self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
 		self.seqSwitch[0].par.Currentsource.menuNames = self.sources
 		
+		self._prevSources = set(self.sources)
 		debug(f'NDI Named Switcher Extension initialized with {len(self.sources)} sources')
 		debug(f'Plural handling: {"enabled" if self.enablePluralHandling else "disabled"}')
+
+		run(
+			"args[0].updateSourceMapping()",
+			self,
+			endFrame=True,
+			delayRef=op.TDResources
+		)
+
+
 
 	def transformPatternForPlurals(self, pattern):
 		"""Transform a regex pattern to handle both singular and plural forms
@@ -40,7 +51,7 @@ class NDINamedRouterExt:
 		It's designed to be conservative and only modify simple word patterns.
 		"""
 		if not self.enablePluralHandling:
-			return pattern
+			return pattern + '\)'
 		
 		# Only apply to simple patterns that end with word characters
 		# This avoids breaking complex regex patterns
@@ -49,11 +60,10 @@ class NDINamedRouterExt:
 			# This handles patterns like 'projector' -> 'projectors?'
 			# But leaves patterns like 'projector.*' or 'projectors?' unchanged
 			if re.search(r'[a-zA-Z0-9_]$', pattern) and not pattern.endswith('s?'):
-				transformed = pattern + 's?'
-				debug(f'Transformed pattern "{pattern}" -> "{transformed}" for plural handling')
+				transformed = pattern + 's?\)'
 				return transformed
 		
-		return pattern
+		return pattern + '\)'
 
 	@property#
 	def seqSwitch(self):
@@ -85,6 +95,15 @@ class NDINamedRouterExt:
 	def sources(self):
 		# list comprehension for backwards compatibility
 		return [_cell.val for _cell in self.ndiTable.col('sourceName')[1:]]
+	
+	@property
+	def currentSources(self):
+		return [_block.par.Currentsource.eval() for _block in self.seqSwitch]
+
+	@currentSources.setter
+	def currentSources(self, values):
+		for _block, _source in zip(self.seqSwitch, values):
+			_block.par.Currentsource.val = _source
 
 	@property
 	def outputResolutions(self):
@@ -183,45 +202,68 @@ class NDINamedRouterExt:
 		
 		matched_idxs = []
 		
-		# Iterate over regex patterns instead of sources
-		for blockIdx, pattern in enumerate(self.regexPatterns):
-			# Apply plural handling transformation if enabled
-			transformedPattern = self.transformPatternForPlurals(pattern)
-			debug(f'Checking pattern {blockIdx}: {pattern} -> {transformedPattern}')
+		if latestSourceName:
+			# When latestSourceName is provided: Only update blocks whose regex patterns match this latest source
+			debug(f'Updating only blocks that match latest source: {latestSourceName}')
 			
-			matchingSources = []  # Will store tuples of (fullSource, shortName)
-			
-			# Find all sources that match this pattern
-			for source in sources:
-				# extract source string "* (source)"
-				sourceGroup = re.search(r'(.+?) \((.+)\)', source)
-				if sourceGroup:
-					sourceName = sourceGroup.group(2)
-					if re.fullmatch(transformedPattern, sourceName, re.IGNORECASE):
-						matchingSources.append((source, sourceName))  # Store both full and short
-						debug(f'Source {sourceName} matches pattern {transformedPattern} (case-insensitive)')
-				else:
-					debug(f'Source string does not match expected format: {source}')
-			
-			# Choose which source to use for this pattern
-			chosenSource = None
-			debug(f"matchingSources: {matchingSources}")
-			if matchingSources:
-				# If latest source is among matches, use it (latest source has last say)
-				if latestSourceName and any(shortName.lower() == latestSourceName.lower() for _, shortName in matchingSources):
-					# Find the full source name for the latest source
-					chosenSource = next(fullSource for fullSource, shortName in matchingSources if shortName.lower() == latestSourceName.lower())
-					debug(f'Using latest source {latestSourceName} for pattern {blockIdx} (case-insensitive match)')
-				else:
-					# Otherwise use the first match
-					chosenSource = matchingSources[0][0]  # Use the full source name
-					debug(f'Using first match {matchingSources[0][1]} for pattern {blockIdx}')
+			for blockIdx, pattern in enumerate(self.regexPatterns):
+				# Apply plural handling transformation if enabled
+				transformedPattern = self.transformPatternForPlurals(pattern)
 				
-				# Set the current source for this block
-				self.seqSwitch[blockIdx].par.Currentsource.val = chosenSource
-				matched_idxs.append(blockIdx)
-			else:
-				debug(f'No sources match pattern {blockIdx}: {transformedPattern}')
+				debug(f'Checking block {blockIdx} with pattern {transformedPattern} for latest source {latestSourceName}')
+				# Check if the latest source matches this block's pattern
+				if re.fullmatch(transformedPattern, latestSourceName, re.IGNORECASE):
+					debug(f'Latest source {latestSourceName} matches pattern {blockIdx}: {transformedPattern}')
+					
+					# Use the full source name directly
+					self.seqSwitch[blockIdx].par.Currentsource.val = latestSourceName
+					matched_idxs.append(blockIdx)
+					debug(f'Updated block {blockIdx} to use latest source: {latestSourceName}')
+				else:
+					# Check if current source is still valid for this block (don't change it)
+					currentSource = self.seqSwitch[blockIdx].par.Currentsource.val
+					if currentSource:
+						if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
+							matched_idxs.append(blockIdx)
+							debug(f'Block {blockIdx} keeping current source: {currentSource}')
+		else:
+			# When not using latest source: For each block, if current output matches regex, keep it. Otherwise find a matching one.
+			debug('Updating all blocks based on current state')
+			
+			for blockIdx, pattern in enumerate(self.regexPatterns):
+				# Apply plural handling transformation if enabled
+				transformedPattern = self.transformPatternForPlurals(pattern)
+				debug(f'Checking block {blockIdx} with pattern: {pattern} -> {transformedPattern}')
+				
+				# First check if current source still matches the pattern
+				currentSource = self.seqSwitch[blockIdx].par.Currentsource.val
+				currentStillMatches = False
+				
+				if currentSource:
+					if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
+						# Current source still matches, keep it
+						currentStillMatches = True
+						matched_idxs.append(blockIdx)
+						debug(f'Block {blockIdx} keeping current source: {currentSource} (still matches pattern)')
+				
+				# If current source doesn't match, find a new matching source
+				if not currentStillMatches:
+					matchingSource = None
+					
+					# Find first source that matches this pattern
+					for source in sources:
+						if re.fullmatch(transformedPattern, source, re.IGNORECASE):
+							matchingSource = source
+							debug(f'Source {source} matches pattern {transformedPattern} (case-insensitive)')
+							break
+					
+					# Use the matching source if found
+					if matchingSource:
+						self.seqSwitch[blockIdx].par.Currentsource.val = matchingSource
+						matched_idxs.append(blockIdx)
+						debug(f'Updated block {blockIdx} to new matching source: {matchingSource}')
+					else:
+						debug(f'No sources match pattern {blockIdx}: {transformedPattern}')
 		
 		debug(f"Updated source mapping {self.seqSwitch}")
 		for idx_block, _block in enumerate(self.seqSwitch):
@@ -244,15 +286,22 @@ class NDINamedRouterExt:
 				self.seqSwitch[0].par.Currentsource.menuNames = names
 		debug(f'updating menus with {sources} cause they appeared')
 		
-		# Extract latest source name from the callback parameter
-		latestSourceName = None
-		if latestSource:
-			latestSourceGroup = re.search(r'(.+?) \((.+)\)', latestSource)
-			if latestSourceGroup:
-				latestSourceName = latestSourceGroup.group(2)  # Use the content in parentheses
+		# # Extract latest source name from the callback parameter
+		# latestSourceName = None
+		# if latestSource:
+		# 	latestSourceGroup = re.search(r'(.+?) \((.+)\)', latestSource)
+		# 	if latestSourceGroup:
+		# 		latestSourceName = latestSourceGroup.group(2)  # Use the content in parentheses
 		
-		# Update source mapping with the latest source having priority
-		self.updateSourceMapping(latestSourceName)
+		debug(f'prev sources: {self._prevSources}')
+		debug(f'new sources: {sources}')
+		_newSources = set(sources) - self._prevSources
+		self._prevSources = set(sources)
+		debug(f'prev - new: {_newSources}')
+		for _source in _newSources:
+			# Update source mapping with the latest source having priority
+			debug(f'updating source mapping for {_source} because it appeared')
+			self.updateSourceMapping(_source)
 		
 		# Note: updateSourceMapping already calls broadcastStateUpdate()
 
@@ -263,16 +312,19 @@ class NDINamedRouterExt:
 			if _source in self.seqSwitch[0].par.Currentsource.menuLabels:
 				labels = self.seqSwitch[0].par.Currentsource.menuLabels
 				names = self.seqSwitch[0].par.Currentsource.menuNames
+				saved_sources = self.currentSources
 				labels.remove(_source)
 				names.remove(_source)
 				self.seqSwitch[0].par.Currentsource.menuLabels = labels
 				self.seqSwitch[0].par.Currentsource.menuNames = names
+				self.currentSources = saved_sources
 		debug(f'updating menus after sources disappeared')
 		
 		# Update source mapping after sources disappeared
 		self.updateSourceMapping()
 		
 		# Note: updateSourceMapping already calls broadcastStateUpdate()
+
 
 	def RefreshSourceMapping(self):
 		"""Call this method to manually refresh the source mapping"""
