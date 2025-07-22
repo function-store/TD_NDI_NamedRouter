@@ -381,4 +381,9 @@ if not ext.isConnected():
 
 ## License
 
-TODO
+This project is licensed under the [CC BY-NC-SA 4.0 license](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+You may use, modify, and share the work **non-commercially**, with attribution and ShareAlike.
+
+### Commercial Use
+
+If you wish to use this project commercially, you must contact the author for commercial permission at: dan@functionstore.xyz
