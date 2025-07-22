@@ -14,7 +14,7 @@ NDI Named Router is a TouchDesigner component that automatically routes NDI inpu
 - **Smart Routing**: Automatically matches NDI sources to outputs using customizable name patterns
 - **Generic Input/Output**: Works with any NDI sources and any video outputs - not limited to specific device types
 - **TouchDesigner Integration**: Native TouchDesigner component that integrates seamlessly with your networks
-- **Optional Web Control**: Web interface available for remote control and monitoring when needed
+- **Optional Advanced Web Control**: Full-featured web interface with configuration management, source refresh, and mobile support
 - **Real-time Updates**: Automatically adapts when NDI sources appear, disappear, or change
 
 ## How It Works
@@ -57,9 +57,10 @@ The system automatically handles source name variations:
 - Shows current assignments and source status in component interface
 
 #### Manual Override
-- Manually assign specific NDI sources to outputs via component parameters
-- Override automatic pattern matching when needed
-- Changes take effect immediately
+- **TouchDesigner Component**: Manually assign sources via component parameters
+- **Web Interface**: Use dropdowns to select specific NDI sources for each output
+- **Configuration Management**: Save current configurations and recall them later
+- Changes take effect immediately with visual feedback
 
 ### Optional Web Interface
 
@@ -70,8 +71,13 @@ The system automatically handles source name variations:
 #### Web Interface Features
 - **Output Monitoring**: View all configured outputs and their current sources
 - **Source Selection**: Manually assign NDI sources to outputs via dropdowns
+- **Configuration Management**: Save and recall complete routing configurations
+  - **Save Config**: Preserve current source assignments and settings
+  - **Recall Config**: Restore previously saved routing configuration
+- **Source Refresh**: Manual refresh of source mappings and available NDI sources
 - **Real-time Updates**: Interface updates automatically as sources change
-- **Status Indicators**: Visual feedback on connection status and source health
+- **Visual Feedback**: Enhanced notifications, hover effects, and status indicators
+- **Mobile Responsive**: Full functionality on smartphones and tablets
 
 ### Common Use Cases
 
@@ -202,7 +208,19 @@ Access via: `http://ndi-router`
 **No Sources Showing:**
 - Check NDI sources are properly configured and broadcasting
 - Verify NDI Named Router component is running
-- Use "Refresh Sources" in web interface
+- Use "Refresh Sources" button in web interface
+- Try clicking on "Current:" displays to refresh individual source connections
+
+**Source Connection Issues:**
+- Click on the "Current:" display for a specific output to refresh that source connection
+- Use "Save Config" before making changes to preserve working configurations  
+- Use "Recall Config" to restore last known working configuration
+- Check for error notifications in the top-right corner of the web interface
+
+**Configuration Not Saving/Loading:**
+- Verify TouchDesigner project has write permissions
+- Check TouchDesigner console for error messages related to StorageManager
+- Ensure the component's external .tox file can be saved if using external mode
 
 ### Debug Information
 - **TouchDesigner**: Check console for component messages
