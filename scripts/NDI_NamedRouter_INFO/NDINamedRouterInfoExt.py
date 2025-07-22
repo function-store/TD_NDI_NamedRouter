@@ -50,7 +50,7 @@ class NDINamedRouterInfoExt:
 	def postInit(self):
 		# Create the Outputs attribute directly on the component
 		self.Outputs = OutputWrapper(self.ownerComp.Info, self._outputInfo)
-		
+
 		if self.isPeriodicUpdate or self.isUpdateOnStart:
 			self.timerActive = True
 			self.timer.par.start.pulse()
@@ -97,7 +97,7 @@ class NDINamedRouterInfoExt:
 
 	def onTimerCycle(self):
 		self.refreshSources()
-	
+
 	def _updateOutputsProperty(self):
 		"""Update the Outputs attribute on the component"""
 		# Simply reassign the wrapper - this will refresh with current Info data

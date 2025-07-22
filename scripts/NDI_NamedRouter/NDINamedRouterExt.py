@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.29.toe
+Saveorigin : NDI_NamedRouter.44.toe
 Saveversion : 2023.11340
 Info Header End'''
 import re
@@ -35,13 +35,29 @@ class NDINamedRouterExt:
 		debug(f'NDI Named Switcher Extension initialized with {len(self.sources)} sources')
 		debug(f'Plural handling: {"enabled" if self.enablePluralHandling else "disabled"}')
 
+		storedItems = [{'name': 'savedSources', 'readOnly': True}]
+		self.stored = StorageManager(self, ownerComp, storedItems)
+
 		run(
 			"args[0].updateSourceMapping()",
 			self,
 			endFrame=True,
 			delayRef=op.TDResources
 		)
+		run(
+			"args[0].restoreSources()",
+			self,
+			delayMilliSeconds = 1000,
+			delayRef=op.TDResources
+		)
 
+	def restoreSources(self):
+		debug('[NDI Named Router Ext] Restoring sources')
+		savedSources = self.stored['savedSources']
+		for _block, _source in zip(self.seqSwitch, savedSources):
+			_block.par.Currentsource.val = _source['source']
+			_block.par.Showplaceholder.val = _source['showPlaceholder']
+			debug(f'Restored source for block {_block.index}: {_source["source"]}; showPlaceholder: {_source["showPlaceholder"]}')
 
 
 	def transformPatternForPlurals(self, pattern):
@@ -120,6 +136,19 @@ class NDINamedRouterExt:
 		return resolutions
 
 
+	def _saveCurrentSources(self):
+		savedSources = []
+		for _block in self.seqSwitch:
+			savedSources.append({'source': _block.par.Currentsource.eval(), 'showPlaceholder': _block.par.Showplaceholder.eval()})
+		self.stored['savedSources'] = savedSources
+		debug(f'Saved current sources: {savedSources}')
+
+	def onProjectPreSave(self):
+		# save sources
+		self._saveCurrentSources()
+
+	def onParSavecurrent(self):
+		self._saveCurrentSources()
 
 	def getCurrentState(self):
 		"""Get current state for WebSocket communication"""
