@@ -222,6 +222,15 @@ This component allows you to:
 - Get real-time updates about output names, current sources, and resolutions
 - Use the data in your own TouchDesigner networks without running the full NDI Named Switcher
 
+### Component Parameters
+
+The NDI_NamedRouter_INFO component includes several parameters for controlling its behavior:
+
+- **Update**: Enable periodic updates from the server
+- **Update On Start**: Request server state once when the component initializes
+- **Request State**: Button to manually request current state from server
+- **Debug Messages**: Enable debug output for troubleshooting
+
 ### Usage
 
 It is suggested to have one of this component in your network as it has a Global OP Shortcut as `op.NDI_INFO`.
@@ -234,6 +243,7 @@ ext = op.NDI_INFO.ext.NamedRouterInfoExt
 # Check connection status
 if ext.isConnected():
     print("Connected to NDI Named Switcher server")
+    status = ext.getConnectionStatus()  # Returns 'connected' or 'disconnected'
 
 # Get number of outputs
 num_outputs = ext.getNumOutputs()
@@ -270,14 +280,46 @@ output_names = ext.getOutputNames()           # ['Projector', 'LED Wall', 'Camer
 current_sources = ext.getCurrentSources()     # Current NDI sources for each output
 resolutions = ext.getOutputResolutions()      # [(1920, 1080), (3840, 2160), ...]
 available_sources = ext.getAvailableSources() # All available NDI sources
+
+# Get connection information
+connection_status = ext.getConnectionStatus() # 'connected' or 'disconnected'
+num_outputs = ext.getNumOutputs()            # Number of configured outputs
+full_state = ext.getCurrentState()           # Complete server state dictionary
+
+# Manual actions (same as button parameters)
+ext.requestState()        # Request fresh state from server
+ext.refreshSources()      # Tell server to refresh its source mappings
+ext.sendPing()           # Send ping to test connection
+```
+
+### Automatic Update Behavior
+
+The component offers flexible update modes:
+
+- **Update On Start Only**: Component requests server state once when initialized (default behavior)
+- **Periodic Updates**: Component continuously polls the server for updates at regular intervals
+- **Manual Updates**: Use parameter buttons or extension methods to request updates on demand
+
+**Timer Control:**
+```python
+# Enable/disable periodic updates
+ext.timerActive = True   # Start periodic updates
+ext.timerActive = False  # Stop periodic updates
+
+# Check if updates are enabled
+if ext.isPeriodicUpdate:
+    print("Periodic updates are enabled")
+if ext.isUpdateOnStart:
+    print("Update on start is enabled")
 ```
 
 ### Setup Instructions
 
 1. **Add Component**: Place the `NDI_NamedRouter_INFO` component in your TouchDesigner project
 2. **Configure Connection**: The WebSocketDAT should connect to `localhost:8080` (or your server's address/port)
-3. **Automatic Connection**: The component will automatically connect and request data when initialized
-4. **Access Data**: Use `ext.Outputs.outputname` or `ext.ownerComp.Info['Output Name']` to access information, or `op.NDI_INFO.Outputs.projector.resx`
+3. **Configure Update Mode**: Set `Update` parameter for periodic updates or leave `Update On Start` for one-time initialization
+4. **Automatic Connection**: The component will automatically connect and request data based on your update settings
+5. **Access Data**: Use `ext.Outputs.outputname` or `ext.ownerComp.Info['Output Name']` to access information, for example `op.NDI_INFO.Outputs.projector.resx`
 
 ### Data Structure
 
@@ -292,6 +334,29 @@ op.NDI_INFO.Outputs.projector.resx
 # For example
 op('resolution1').par.w = op.NDI_INFO.Outputs.projector.resx
 op('resolution1').par.h = op.NDI_INFO.Outputs.projector.resy
+```
+
+### NDI_NamedRouter_INFO Troubleshooting
+
+**Component Not Receiving Data:**
+- Check that the main NDI Named Router server is running
+- Verify WebSocket connection to `localhost:8080` (or correct server address)
+- Enable "Debug Messages" parameter to see connection status
+- Try pulsing "Request State" parameter to manually request data
+
+**Output Data Not Available:**
+- Ensure output names match exactly (case-sensitive)
+- Use `ext.getOutputNames()` to see available outputs
+- Try accessing via dictionary: `op.NDI_INFO.Info['Exact Output Name']`
+- Check server has configured outputs with the names you're looking for
+
+**Connection Status:**
+```python
+# Check connection and debug
+if not ext.isConnected():
+    print("Not connected to server")
+    print(f"Status: {ext.getConnectionStatus()}")
+    ext.sendPing()  # Test connectivity
 ```
 
 ## License

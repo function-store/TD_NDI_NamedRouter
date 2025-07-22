@@ -19,9 +19,6 @@ class NDINamedRouterInfoExt:
 		# # Plural handling configuration
 		# self.enablePluralHandling = True
 
-		if self.isPeriodicUpdate or self.isUpdateOnStart:
-			self.timerActive = True
-			self.timer.par.start.pulse()
 
 		# Connection settings
 		self.autoReconnect = True
@@ -53,6 +50,13 @@ class NDINamedRouterInfoExt:
 	def postInit(self):
 		# Create the Outputs attribute directly on the component
 		self.Outputs = OutputWrapper(self.ownerComp.Info, self._outputInfo)
+		
+		if self.isPeriodicUpdate or self.isUpdateOnStart:
+			self.timerActive = True
+			self.timer.par.start.pulse()
+		
+		if _timer := self.ownerComp.op('timer2'):
+			_timer.par.start.pulse()
 		
 	@property
 	def seqSwitch(self):
