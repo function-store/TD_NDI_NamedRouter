@@ -3,12 +3,14 @@ name: Automated Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
+      - 'v*'
+
+permissions:
+  contents: write  # Required to create releases
 
 jobs:
   release:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,11 +18,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir release_assets
-          
-          # Copy all files from modules/release individually
           cp modules/release/* release_assets/
-          
-          # Create a zip with start_server.py, template/, and README.md
           zip -r release_assets/server_bundle.zip start_server.py template README.md
 
       - name: Upload assets to GitHub Release
