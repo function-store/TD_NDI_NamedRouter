@@ -101,6 +101,12 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
                     print(f"Error serving index.html: {e}")
                     self.send_error(500, f"Error loading index.html: {e}")
                 return
+            elif self.path == '/favicon.ico':
+                # Handle favicon request gracefully - return empty 204 response
+                self.send_response(204)  # No Content
+                self.end_headers()
+                print("Served empty favicon response")
+                return
             else:
                 # For other files, use default behavior
                 return super().do_GET()

@@ -190,6 +190,31 @@
             background: #f44336;
         }
 
+        .current-source.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .current-source.clickable:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(76, 175, 80, 0.4);
+        }
+
+        .current-source.clickable:active {
+            transform: translateY(0px);
+        }
+
+        .current-source.clickable::after {
+            content: " 🔄";
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .current-source.clickable:hover::after {
+            opacity: 1;
+        }
+
         .refresh-button {
             background: linear-gradient(45deg, #3182ce, #2c5282);
             color: white;
@@ -206,6 +231,56 @@
         .refresh-button:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(49, 130, 206, 0.4);
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .save-button {
+            background: linear-gradient(45deg, #38a169, #48bb78);
+            border-color: #38a169;
+        }
+
+        .save-button:hover {
+            box-shadow: 0 8px 25px rgba(56, 161, 105, 0.4);
+        }
+
+        .recall-button {
+            background: linear-gradient(45deg, #d69e2e, #ecc94b);
+            border-color: #d69e2e;
+            color: #1a202c;
+        }
+
+        .recall-button:hover {
+            box-shadow: 0 8px 25px rgba(214, 158, 46, 0.4);
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: all 0.3s ease;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: linear-gradient(45deg, #38a169, #48bb78);
+        }
+
+        .notification.error {
+            background: linear-gradient(45deg, #e53e3e, #fc8181);
         }
 
         .last-update {
@@ -272,6 +347,18 @@
                 margin-top: 10px;
                 display: inline-block;
             }
+
+            .control-buttons {
+                flex-direction: column;
+                gap: 8px;
+                width: 100%;
+            }
+
+            .control-buttons .refresh-button {
+                width: 100%;
+                font-size: 0.9em;
+                padding: 12px;
+            }
         }
     </style>
 </head>
@@ -286,7 +373,11 @@
             <div class="control-section">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2>Source Controls</h2>
-                    <button class="refresh-button" onclick="refreshSources()">Refresh Sources</button>
+                    <div class="control-buttons">
+                        <button class="refresh-button" onclick="refreshSources()">Refresh Sources</button>
+                        <button class="refresh-button save-button" onclick="saveConfiguration()">Save Config</button>
+                        <button class="refresh-button recall-button" onclick="recallConfiguration()">Recall Config</button>
+                    </div>
                 </div>
                 
                 <div id="blocksContainer" class="blocks-container">
@@ -381,6 +472,23 @@
                         updateUI();
                     }
                 }
+            } else if (data.action === 'configuration_saved') {
+                console.log('Configuration saved successfully');
+                if (data.state) {
+                    currentState = data.state;
+                    updateUI();
+                }
+                showNotification('Configuration saved successfully', 'success');
+            } else if (data.action === 'configuration_recalled') {
+                console.log('Configuration recalled successfully');
+                if (data.state) {
+                    currentState = data.state;
+                    updateUI();
+                }
+                showNotification('Configuration recalled successfully', 'success');
+            } else if (data.action === 'error') {
+                console.error('Server error:', data.message);
+                showNotification(data.message || 'An error occurred', 'error');
             }
         }
 
@@ -435,7 +543,7 @@
                             </select>
                         </div>
                         
-                        <div class="current-source ${currentSource ? '' : 'empty'}">
+                        <div class="current-source ${currentSource ? 'clickable' : 'empty'}" ${currentSource ? `onclick="setSource(${i}, '${currentSource}')" title="Click to refresh this source connection"` : ''}>
                             Current: ${currentSource || 'No source selected'}
                         </div>
                     </div>
@@ -453,6 +561,16 @@
 
         function setSource(blockIdx, sourceName) {
             console.log(`Setting source for block ${blockIdx}: ${sourceName}`);
+            
+            // Check if this is a refresh of the current source
+            const isRefresh = currentState.current_sources && 
+                             currentState.current_sources[blockIdx] === sourceName && 
+                             sourceName !== '';
+            
+            if (isRefresh) {
+                showNotification(`Refreshing source: ${sourceName}`, 'success');
+            }
+            
             sendMessage({
                 action: 'set_source',
                 block_idx: blockIdx,
@@ -463,6 +581,47 @@
         function refreshSources() {
             console.log('Refreshing sources');
             sendMessage({ action: 'refresh_sources' });
+        }
+
+        function saveConfiguration() {
+            console.log('Saving configuration');
+            sendMessage({ action: 'save_configuration' });
+        }
+
+        function recallConfiguration() {
+            console.log('Recalling configuration');
+            sendMessage({ action: 'recall_configuration' });
+        }
+
+        function showNotification(message, type = 'success') {
+            // Remove any existing notifications
+            const existingNotification = document.querySelector('.notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+
+            // Create new notification
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            // Add to page
+            document.body.appendChild(notification);
+            
+            // Show notification with animation
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
+            
+            // Hide and remove after 3 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
         }
 
         // Initialize when page loads

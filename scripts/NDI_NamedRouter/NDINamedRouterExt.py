@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.44.toe
+Saveorigin : NDI_NamedRouter.51.toe
 Saveversion : 2023.11340
 Info Header End'''
 import re
@@ -30,8 +30,7 @@ class NDINamedRouterExt:
 		
 		self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
 		self.seqSwitch[0].par.Currentsource.menuNames = self.sources
-		
-		self._prevSources = set(self.sources)
+
 		debug(f'NDI Named Switcher Extension initialized with {len(self.sources)} sources')
 		debug(f'Plural handling: {"enabled" if self.enablePluralHandling else "disabled"}')
 
@@ -44,20 +43,15 @@ class NDINamedRouterExt:
 			endFrame=True,
 			delayRef=op.TDResources
 		)
-		run(
-			"args[0].restoreSources()",
-			self,
-			delayMilliSeconds = 1000,
-			delayRef=op.TDResources
-		)
 
-	def restoreSources(self):
-		debug('[NDI Named Router Ext] Restoring sources')
-		savedSources = self.stored['savedSources']
-		for _block, _source in zip(self.seqSwitch, savedSources):
-			_block.par.Currentsource.val = _source['source']
-			_block.par.Showplaceholder.val = _source['showPlaceholder']
-			debug(f'Restored source for block {_block.index}: {_source["source"]}; showPlaceholder: {_source["showPlaceholder"]}')
+		if self.ownerComp.par.Recalllast.eval():
+			run(
+				"args[0]._recallSavedSources()",
+				self,
+				delayMilliSeconds = 1000,
+				delayRef=op.TDResources
+			)
+
 
 
 	def transformPatternForPlurals(self, pattern):
@@ -143,12 +137,29 @@ class NDINamedRouterExt:
 		self.stored['savedSources'] = savedSources
 		debug(f'Saved current sources: {savedSources}')
 
+	def _recallSavedSources(self):
+		savedSources = self.stored['savedSources']
+		for _block, _source in zip(self.seqSwitch, savedSources):
+			if _source['source'] in self.seqSwitch[0].par.Currentsource.menuNames:
+				_block.par.Currentsource.val = _source['source']
+				_block.par.Showplaceholder.val = _source['showPlaceholder']
+			else:
+				_block.par.Showplaceholder.val = True
+		debug(f'Recalled saved sources: {savedSources}')
+
 	def onProjectPreSave(self):
 		# save sources
-		self._saveCurrentSources()
+		#self._saveCurrentSources()
+		pass
 
 	def onParSavecurrent(self):
 		self._saveCurrentSources()
+		if self.ownerComp.par.enableexternaltox.eval():
+			self.ownerComp.saveExternalTox()
+		project.save()
+
+	def onParRecallsaved(self):
+		self._recallSavedSources()
 
 	def getCurrentState(self):
 		"""Get current state for WebSocket communication"""
@@ -198,6 +209,26 @@ class NDINamedRouterExt:
 			debug(f'Error refreshing sources: {e}')
 			return False
 
+	def handleSaveConfiguration(self):
+		"""Handle save configuration request from web interface"""
+		try:
+			debug('Saving current configuration from web interface')
+			self.onParSavecurrent()
+			return True
+		except Exception as e:
+			debug(f'Error saving configuration: {e}')
+			return False
+
+	def handleRecallConfiguration(self):
+		"""Handle recall configuration request from web interface"""
+		try:
+			debug('Recalling saved configuration from web interface')
+			self._recallSavedSources()
+			return True
+		except Exception as e:
+			debug(f'Error recalling configuration: {e}')
+			return False
+
 	def onSeqSwitchNSourceregex(self, idx, val):
 		debug(f'onSeqSwitchNSourceregex: {idx} {val}')
 		return
@@ -206,6 +237,7 @@ class NDINamedRouterExt:
 		_comp = self.ownerComp.op(f'ndi{idx}')
 		_op = _comp.op('ndiin1')
 		_op.par.name = val
+		#self.seqSwitch[idx].par.Showplaceholder.val = False
 		
 		# Notify web clients of source change
 		debug(f'Source changed for block {idx}: {val}')
@@ -258,8 +290,13 @@ class NDINamedRouterExt:
 		else:
 			# When not using latest source: For each block, if current output matches regex, keep it. Otherwise find a matching one.
 			debug('Updating all blocks based on current state')
-			
 			for blockIdx, pattern in enumerate(self.regexPatterns):
+				# this is to prevent overriding a manual source change
+				if self.seqSwitch[blockIdx].par.Currentsource.eval() in sources:
+					debug(f'current source is already in prev sources, nothing to do really')
+					matched_idxs.append(blockIdx)
+					continue
+
 				# Apply plural handling transformation if enabled
 				transformedPattern = self.transformPatternForPlurals(pattern)
 				debug(f'Checking block {blockIdx} with pattern: {pattern} -> {transformedPattern}')
@@ -295,14 +332,16 @@ class NDINamedRouterExt:
 						debug(f'No sources match pattern {blockIdx}: {transformedPattern}')
 		
 		debug(f"Updated source mapping {self.seqSwitch}")
-		for idx_block, _block in enumerate(self.seqSwitch):
-			_block.par.Showplaceholder.val = idx_block not in matched_idxs
+		if latestSourceName is not None and matched_idxs:
+			for _idx in matched_idxs:
+				self.seqSwitch[_idx].par.Showplaceholder.val = False
 		
 		# Notify web clients of state changes
 		if hasattr(self, 'webHandler'):
 			self.webHandler.broadcastStateUpdate()
 		
 	def onSourceAppeared(self, dat, _sources):
+	
 		latestSource = _sources[0].sourceName
 		sources = [_source.sourceName for _source in _sources]
 		for _source in sources:
@@ -314,20 +353,8 @@ class NDINamedRouterExt:
 				self.seqSwitch[0].par.Currentsource.menuLabels = labels
 				self.seqSwitch[0].par.Currentsource.menuNames = names
 		debug(f'updating menus with {sources} cause they appeared')
-		
-		# # Extract latest source name from the callback parameter
-		# latestSourceName = None
-		# if latestSource:
-		# 	latestSourceGroup = re.search(r'(.+?) \((.+)\)', latestSource)
-		# 	if latestSourceGroup:
-		# 		latestSourceName = latestSourceGroup.group(2)  # Use the content in parentheses
-		
-		debug(f'prev sources: {self._prevSources}')
-		debug(f'new sources: {sources}')
-		_newSources = set(sources) - self._prevSources
-		self._prevSources = set(sources)
-		debug(f'prev - new: {_newSources}')
-		for _source in _newSources:
+
+		for _source in sources:
 			# Update source mapping with the latest source having priority
 			debug(f'updating source mapping for {_source} because it appeared')
 			self.updateSourceMapping(_source)
@@ -467,13 +494,13 @@ class WebHandler:
 			
 	def handleMessage(self, webServerDAT, client, message):
 		"""Handle incoming WebSocket messages"""
-		debug(f'Handling message: {message}')
+		#debug(f'Handling message: {message}')
 		
 		try:
 			data = json.loads(message)
-			debug(f'JSON parsed successfully: {data}')
+			#debug(f'JSON parsed successfully: {data}')
 			action = data.get('action')
-			debug(f'Action extracted: {action}')
+			#debug(f'Action extracted: {action}')
 			
 			if not self.extension:
 				debug('ERROR: Extension not found, sending error response')
@@ -557,15 +584,63 @@ class WebHandler:
 					}
 					webServerDAT.webSocketSendText(client, json.dumps(error_response))
 			
+			elif action == 'save_configuration':
+				debug('Processing save_configuration action')
+				success = self.extension.handleSaveConfiguration()
+				debug(f'Extension handleSaveConfiguration result: {success}')
+				
+				if success:
+					debug('Save configuration successful, getting updated state')
+					state = self.extension.getCurrentState()
+					response = {
+						'action': 'configuration_saved',
+						'state': state,
+						'message': 'Configuration saved successfully'
+					}
+					debug('Sending configuration saved response')
+					webServerDAT.webSocketSendText(client, json.dumps(response))
+					debug('Configuration saved response sent successfully')
+				else:
+					debug('Save configuration failed, sending error response')
+					error_response = {
+						'action': 'error',
+						'message': 'Failed to save configuration'
+					}
+					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+			
+			elif action == 'recall_configuration':
+				debug('Processing recall_configuration action')
+				success = self.extension.handleRecallConfiguration()
+				debug(f'Extension handleRecallConfiguration result: {success}')
+				
+				if success:
+					debug('Recall configuration successful, getting updated state')
+					state = self.extension.getCurrentState()
+					response = {
+						'action': 'configuration_recalled',
+						'state': state,
+						'message': 'Configuration recalled successfully'
+					}
+					debug('Sending configuration recalled response')
+					webServerDAT.webSocketSendText(client, json.dumps(response))
+					debug('Configuration recalled response sent successfully')
+				else:
+					debug('Recall configuration failed, sending error response')
+					error_response = {
+						'action': 'error',
+						'message': 'Failed to recall configuration'
+					}
+					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+			
 			elif action == 'ping':
-				debug('Processing ping action')
+				#debug('Processing ping action')
 				pong_response = {
 					'action': 'pong',
 					'timestamp': time.time()
 				}
-				debug('Sending pong response')
+				#debug('Sending pong response')
 				webServerDAT.webSocketSendText(client, json.dumps(pong_response))
-				debug('Pong response sent')
+				#debug('Pong response sent')
 			
 			else:
 				debug(f'Unknown action received: {action}')
