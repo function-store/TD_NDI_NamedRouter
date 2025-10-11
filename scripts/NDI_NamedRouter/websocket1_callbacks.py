@@ -13,14 +13,13 @@ def debug(message):
 		tdu.debug.debug(message)
 
 def onConnect(dat):
-	"""Called when a WebSocket client connects"""
-	debug(f'WebSocket client connected to DAT: {dat.name}')
+	"""Called when bridge server connects"""
+	debug(f'Bridge server connected to DAT: {dat.name}')
 	
-	# Use the handler to send initial state and track client
+	# Send initial state to bridge when it connects
 	_ext = ext.NDINamedRouterExt
 	if _ext and _ext.webHandler:
-		debug(f'Adding client to WebHandler')
-		_ext.webHandler.addClient(dat)
+		debug(f'Sending initial state to bridge')
 		_ext.webHandler.sendInitialState(dat, dat)
 	else:
 		debug('WARNING: Extension or WebHandler not found')
@@ -28,13 +27,10 @@ def onConnect(dat):
 	return
 
 def onDisconnect(dat):
-	"""Called when a WebSocket client disconnects"""
-	debug('WebSocket client disconnected from DAT')
+	"""Called when bridge server disconnects"""
+	debug('Bridge server disconnected from DAT')
 	
-	# Remove client from handler's tracking
-	_ext = ext.NDINamedRouterExt
-	if _ext and _ext.webHandler:
-		_ext.webHandler.removeClient(dat)
+	# Could add reconnection logic here if needed
 	
 	return
 

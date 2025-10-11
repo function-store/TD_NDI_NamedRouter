@@ -392,77 +392,48 @@ class NDINamedRouterExt:
 		
 
 class WebHandler:
-	"""Handler class for WebSocket communication with web clients"""
+	"""Handler class for WebSocket communication with bridge server"""
 	
 	def __init__(self, extension):
 		self.extension = extension
-		
 		self.webSocketDAT : webSocketDAT = self.extension.ownerComp.op('websocket1')
-		self.connected_clients = set()  # Track connected clients
 		
-	def addClient(self, client):
-		"""Add a client to the connected clients set"""
-		self.connected_clients.add(client)
-		debug(f'Client added. Total clients: {len(self.connected_clients)}')
-		
-	def removeClient(self, client):
-		"""Remove a client from the connected clients set"""
-		self.connected_clients.discard(client)
-		debug(f'Client removed. Total clients: {len(self.connected_clients)}')
-		
-	def broadcastToAll(self, message, webSocketDAT=None):
-		"""Send message to all connected clients"""
+	def sendToBridge(self, message, webSocketDAT=None):
+		"""Send message to bridge server (which broadcasts to all browsers)"""
 		if webSocketDAT is None:
 			webSocketDAT = self.webSocketDAT
 			
 		if not webSocketDAT:
-			debug('ERROR: No WebServer DAT available for broadcasting')
+			debug('ERROR: No WebSocket DAT available for sending')
 			return
 			
-		# Remove any clients that are no longer valid
-		clients_to_remove = []
-		for client in self.connected_clients:
-			try:
-				webSocketDAT.sendText( message)
-			except Exception as e:
-				debug(f'Failed to send to client {client}: {e}')
-				clients_to_remove.append(client)
-		
-		# Clean up invalid clients
-		for client in clients_to_remove:
-			self.connected_clients.discard(client)
-		
-		debug(f'Message sent to {len(self.connected_clients)} clients')
+		try:
+			webSocketDAT.sendText(message)
+			debug(f'Message sent to bridge')
+		except Exception as e:
+			debug(f'Failed to send to bridge: {e}')
 		
 	def broadcastStateUpdate(self, webSocketDAT=None):
-		"""Broadcast current state to all connected WebSocket clients"""
-		if not self.connected_clients:
-			debug('No connected clients to broadcast to')
-			return
-			
-		debug('Broadcasting state update to all connected clients')
+		"""Send current state to bridge (which broadcasts to all browsers)"""
+		debug('Sending state update to bridge')
 		
 		if self.extension:
 			state = self.extension.getCurrentState()
-			debug(f'Current state for broadcast: {len(state)} keys')
+			debug(f'Current state: {len(state)} keys')
 			response = {
 				'action': 'state_update',
 				'state': state
 			}
 			message = json.dumps(response)
-			debug(f'Broadcasting state: {message[:200]}...')
-			self.broadcastToAll(message, webSocketDAT)
-			debug('State broadcast completed')
+			debug(f'Sending state: {message[:200]}...')
+			self.sendToBridge(message, webSocketDAT)
+			debug('State sent to bridge')
 		else:
-			debug('WARNING: Extension not found for broadcast')
+			debug('WARNING: Extension not found')
 			
 	def broadcastSourceChange(self, block_idx, source_name, webSocketDAT=None):
-		"""Broadcast source change to all connected WebSocket clients"""
-		if not self.connected_clients:
-			debug('No connected clients to broadcast to')
-			return
-			
-		debug(f'Broadcasting source change: block_idx={block_idx}, source_name={source_name}')
+		"""Send source change to bridge (which broadcasts to all browsers)"""
+		debug(f'Sending source change to bridge: block_idx={block_idx}, source_name={source_name}')
 		
 		response = {
 			'action': 'source_changed',
@@ -470,13 +441,13 @@ class WebHandler:
 			'source_name': source_name
 		}
 		message = json.dumps(response)
-		debug(f'Source change broadcast message: {response}')
-		self.broadcastToAll(message, webSocketDAT)
-		debug('Source change broadcast completed')
+		debug(f'Source change message: {response}')
+		self.sendToBridge(message, webSocketDAT)
+		debug('Source change sent to bridge')
 		
 	def sendInitialState(self, webSocketDAT, client):
-		"""Send initial state to a newly connected client"""
-		debug('Sending initial state to newly connected client')
+		"""Send initial state to bridge (bridge will forward to requesting browser)"""
+		debug('Sending initial state to bridge')
 		
 		if self.extension:
 			debug('Extension found, getting current state...')
@@ -487,8 +458,8 @@ class WebHandler:
 				'state': state
 			}
 			debug(f'Sending state response: {json.dumps(response)[:200]}...')
-			webSocketDAT.sendText( json.dumps(response))
-			debug('Initial state sent to connected client')
+			webSocketDAT.sendText(json.dumps(response))
+			debug('Initial state sent to bridge')
 		else:
 			debug('WARNING: Extension not found, cannot send initial state')
 			
