@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.56.toe
+Saveorigin : NDI_NamedRouter.58.toe
 Saveversion : 2023.11880
 Info Header End'''
 import re
@@ -22,11 +22,15 @@ class NDINamedRouterExt:
 		self.ownerComp = ownerComp
 		self.ndiTable : ndiDAT = self.ownerComp.op('ndi_watcher')
 		
+		# Component identification for multi-instance support
+		self.componentId = self.ownerComp.par.Componentid.eval() if hasattr(self.ownerComp.par, 'Componentid') else self.ownerComp.name
+		
 		# Plural handling configuration
 		self.enablePluralHandling = True
 		
 		# Initialize the WebSocket handler
 		self.webHandler = WebHandler(self)
+
 		
 		self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
 		self.seqSwitch[0].par.Currentsource.menuNames = self.sources
@@ -174,6 +178,8 @@ class NDINamedRouterExt:
 		"""Get current state for WebSocket communication"""
 		try:
 			state = {
+				'component_id': self.componentId,
+				'component_name': self.ownerComp.name,
 				'sources': self.sources,
 				'output_names': self.outputNames,
 				'current_sources': [block.par.Currentsource.val for block in self.seqSwitch],
@@ -429,7 +435,10 @@ class NDINamedRouterExt:
 		# Broadcast state update after refresh
 		if hasattr(self, 'webHandler'):
 			self.webHandler.broadcastStateUpdate()
-		
+
+	def onReconnectTimerTrigger(self):
+		"""TouchDesigner callback when reconnect timer done"""
+		self.ownerComp.par.Restart.pulse()
 
 class WebHandler:
 	"""Handler class for WebSocket communication with bridge server"""
@@ -437,7 +446,24 @@ class WebHandler:
 	def __init__(self, extension):
 		self.extension = extension
 		self.webSocketDAT : webSocketDAT = self.extension.ownerComp.op('websocket1')
+		self.reconnectTimer = self.extension.ownerComp.op('timer1')
 		
+
+	def onConnect(self, webSocketDat ):
+		"""Called when bridge server connects"""
+		debug(f'Bridge server connected to DAT: {webSocketDat.name}')
+		# Send initial state to bridge when it connects
+		self.reconnectTimer.par.initialize.pulse()
+		self.sendInitialState(webSocketDat)
+		debug(f'Initial state sent to bridge')
+		return
+
+	def onDisconnect(self, webSocketDat):
+		"""Called when bridge server disconnects"""
+		debug(f'Bridge server disconnected from DAT: {webSocketDat.name}')
+		self.reconnectTimer.par.start.pulse()
+		return
+
 	def sendToBridge(self, message, webSocketDAT=None):
 		"""Send message to bridge server (which broadcasts to all browsers)"""
 		if webSocketDAT is None:
@@ -485,7 +511,7 @@ class WebHandler:
 		self.sendToBridge(message, webSocketDAT)
 		debug('Source change sent to bridge')
 		
-	def sendInitialState(self, webSocketDAT, client):
+	def sendInitialState(self, webSocketDAT):
 		"""Send initial state to bridge (bridge will forward to requesting browser)"""
 		debug('Sending initial state to bridge')
 		
@@ -712,6 +738,22 @@ class WebHandler:
 			elif action == 'error':
 				# Ignore error messages (they're informational only, don't respond)
 				debug(f'Error message received: {data.get("message")}')
+			
+			elif action == 'state_update':
+				# Ignore state updates from other components (we only send these, not receive)
+				debug('Received state_update from another component (ignoring)')
+			
+			elif action == 'source_changed':
+				# Ignore source change notifications from other components
+				debug('Received source_changed from another component (ignoring)')
+			
+			elif action == 'configuration_saved':
+				# Ignore configuration saved notifications from other components
+				debug('Received configuration_saved from another component (ignoring)')
+			
+			elif action == 'configuration_recalled':
+				# Ignore configuration recalled notifications from other components
+				debug('Received configuration_recalled from another component (ignoring)')
 			
 			else:
 				debug(f'Unknown action received: {action}')

@@ -20,7 +20,7 @@ def onConnect(dat):
 	_ext = ext.NDINamedRouterExt
 	if _ext and _ext.webHandler:
 		debug(f'Sending initial state to bridge')
-		_ext.webHandler.sendInitialState(dat, dat)
+		_ext.webHandler.onConnect(dat)
 	else:
 		debug('WARNING: Extension or WebHandler not found')
 	
@@ -29,7 +29,9 @@ def onConnect(dat):
 def onDisconnect(dat):
 	"""Called when bridge server disconnects"""
 	debug('Bridge server disconnected from DAT')
-	
+	_ext = ext.NDINamedRouterExt
+	if _ext and _ext.webHandler:
+		_ext.webHandler.onDisconnect(dat)
 	# Could add reconnection logic here if needed
 	
 	return

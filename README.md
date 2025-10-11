@@ -235,23 +235,303 @@ Access via: `http://ndi-router`
 
 ### WebSocket API
 
-The bridge server forwards JSON messages between browsers and TouchDesigner.
+The bridge server forwards JSON messages between browsers and clients (TouchDesigner or custom implementations).
 
-**Messages from Web Interface to TouchDesigner:**
+**Messages from Web Interface to Clients:**
 ```json
 {"action": "request_state"}
-{"action": "set_source", "block_idx": 0, "source_name": "Camera 1"}
+{"action": "set_source", "component_id": "Studio_A", "block_idx": 0, "source_name": "Camera 1"}
+{"action": "set_lock", "component_id": "Studio_A", "block_idx": 0, "locked": true}
+{"action": "set_lock_global", "component_id": "Studio_A", "locked": true}
 {"action": "refresh_sources"}
+{"action": "save_configuration"}
+{"action": "recall_configuration"}
 {"action": "ping"}
 ```
 
-**Messages from TouchDesigner to Web Interface:**
+**Messages from Clients to Bridge:**
 ```json
+{"action": "register_client", "client_type": "controller", "auto_update": true}
 {"action": "state_update", "state": {...}}
 {"action": "source_changed", "block_idx": 0, "source_name": "Camera 1"}
+{"action": "request_state"}
 {"action": "error", "message": "Error description"}
 {"action": "pong"}
 ```
+
+### Implementing Custom Clients (Non-TouchDesigner)
+
+You can integrate any system (Raspberry Pi, Linux server, custom hardware, etc.) with the NDI Named Router web interface by implementing a WebSocket client that follows the protocol.
+
+#### Connection Setup
+
+1. **Connect to the bridge server** as a WebSocket client:
+   - **Host:** Your server IP (e.g., `192.168.1.100` or `localhost`)
+   - **Port:** `8081` (TouchDesigner/client port)
+   - **Protocol:** WebSocket (`ws://`)
+   - **URL:** `ws://your-server-ip:8081`
+
+2. **Register your client** with the bridge (optional but recommended):
+   ```json
+   {
+     "action": "register_client",
+     "client_type": "controller",
+     "auto_update": true
+   }
+   ```
+   - `client_type`: Either `"controller"` (full control) or `"info"` (read-only)
+   - `auto_update`: `true` to receive all state broadcasts, `false` to only get updates when you request them
+
+3. **Send state updates** when your configuration changes
+
+4. **Handle commands** from the web interface
+
+#### Required State Format
+
+Your client must send periodic state updates with this structure:
+
+```json
+{
+  "action": "state_update",
+  "state": {
+    "component_id": "RaspberryPi_1",
+    "component_name": "Living Room Pi",
+    "sources": ["HDMI_Input", "USB_Camera", "Screen_Capture"],
+    "output_names": ["TV_Output", "Monitor_Output"],
+    "current_sources": ["HDMI_Input", "USB_Camera"],
+    "regex_patterns": [".*TV.*", ".*Monitor.*"],
+    "effective_regex_patterns": [".*TV.*\\)", ".*Monitor.*\\)"],
+    "output_resolutions": [[1920, 1080], [1280, 720]],
+    "locks": [false, false],
+    "lock_global": false,
+    "plural_handling_enabled": false,
+    "last_update": 1234567890.123
+  }
+}
+```
+
+**Field Descriptions:**
+- `component_id` (string, required): Unique identifier for your client
+- `component_name` (string, required): Human-readable name shown in web interface
+- `sources` (array of strings, required): All available NDI sources
+- `output_names` (array of strings, required): Names of your outputs
+- `current_sources` (array of strings, required): Currently selected source for each output
+- `regex_patterns` (array of strings, optional): Pattern for each output (use empty strings if not applicable)
+- `effective_regex_patterns` (array of strings, optional): Transformed patterns (use empty strings if not applicable)
+- `output_resolutions` (array of [width, height], required): Resolution for each output
+- `locks` (array of booleans, required): Lock state for each output
+- `lock_global` (boolean, required): Global lock state
+- `plural_handling_enabled` (boolean, optional): Whether plural matching is enabled
+- `last_update` (number, required): Unix timestamp
+
+#### Handling Commands
+
+Your client should handle these incoming commands:
+
+**Request State:**
+```json
+{"action": "request_state"}
+```
+→ Respond with a `state_update` message containing your current state
+
+**Set Source:**
+```json
+{
+  "action": "set_source",
+  "component_id": "RaspberryPi_1",
+  "block_idx": 0,
+  "source_name": "HDMI_Input"
+}
+```
+→ Change the source for the specified output index, then send a `state_update`
+
+**Set Lock:**
+```json
+{
+  "action": "set_lock",
+  "component_id": "RaspberryPi_1",
+  "block_idx": 0,
+  "locked": true
+}
+```
+→ Lock/unlock the specified output, then send a `state_update`
+
+**Set Global Lock:**
+```json
+{
+  "action": "set_lock_global",
+  "component_id": "RaspberryPi_1",
+  "locked": true
+}
+```
+→ Lock/unlock all outputs, then send a `state_update`
+
+**Refresh Sources:**
+```json
+{"action": "refresh_sources"}
+```
+→ Re-scan for available NDI sources, update your state, then send a `state_update`
+
+**Ping:**
+```json
+{"action": "ping"}
+```
+→ Respond with `{"action": "pong"}`
+
+#### Example Implementation (Python)
+
+```python
+import asyncio
+import websockets
+import json
+import time
+
+class NDIRouterClient:
+    def __init__(self, component_id, component_name, server_url="ws://localhost:8081"):
+        self.component_id = component_id
+        self.component_name = component_name
+        self.server_url = server_url
+        self.websocket = None
+        
+        # Your configuration
+        self.sources = ["Source1", "Source2", "Source3"]
+        self.output_names = ["Output1", "Output2"]
+        self.current_sources = ["Source1", "Source2"]
+        self.output_resolutions = [[1920, 1080], [1920, 1080]]
+        self.locks = [False, False]
+        self.lock_global = False
+    
+    def get_state(self):
+        """Build state message"""
+        return {
+            "action": "state_update",
+            "state": {
+                "component_id": self.component_id,
+                "component_name": self.component_name,
+                "sources": self.sources,
+                "output_names": self.output_names,
+                "current_sources": self.current_sources,
+                "regex_patterns": ["" for _ in self.output_names],
+                "effective_regex_patterns": ["" for _ in self.output_names],
+                "output_resolutions": self.output_resolutions,
+                "locks": self.locks,
+                "lock_global": self.lock_global,
+                "plural_handling_enabled": False,
+                "last_update": time.time()
+            }
+        }
+    
+    async def handle_message(self, message):
+        """Handle incoming commands"""
+        data = json.loads(message)
+        action = data.get('action')
+        
+        # Only process commands for this component
+        component_id = data.get('component_id')
+        if component_id and component_id != self.component_id:
+            return  # Ignore commands for other components
+        
+        if action == 'request_state':
+            await self.send_state()
+        
+        elif action == 'set_source':
+            block_idx = data.get('block_idx')
+            source_name = data.get('source_name')
+            if block_idx < len(self.current_sources):
+                self.current_sources[block_idx] = source_name
+                # Apply the change in your system here
+                await self.send_state()
+        
+        elif action == 'set_lock':
+            block_idx = data.get('block_idx')
+            locked = data.get('locked')
+            if block_idx < len(self.locks):
+                self.locks[block_idx] = locked
+                await self.send_state()
+        
+        elif action == 'set_lock_global':
+            self.lock_global = data.get('locked', False)
+            await self.send_state()
+        
+        elif action == 'refresh_sources':
+            # Re-scan for NDI sources
+            self.sources = self.scan_ndi_sources()
+            await self.send_state()
+        
+        elif action == 'ping':
+            await self.websocket.send(json.dumps({"action": "pong"}))
+    
+    def scan_ndi_sources(self):
+        """Scan for available NDI sources - implement your NDI discovery here"""
+        # Example: Use NDI SDK to discover sources
+        return ["Source1", "Source2", "Source3"]
+    
+    async def send_state(self):
+        """Send current state to server"""
+        if self.websocket:
+            await self.websocket.send(json.dumps(self.get_state()))
+    
+    async def run(self):
+        """Main loop"""
+        while True:
+            try:
+                async with websockets.connect(self.server_url) as websocket:
+                    self.websocket = websocket
+                    print(f"Connected to {self.server_url}")
+                    
+                    # Register as a controller client with auto-updates
+                    await websocket.send(json.dumps({
+                        "action": "register_client",
+                        "client_type": "controller",
+                        "auto_update": True
+                    }))
+                    
+                    # Send initial state
+                    await self.send_state()
+                    
+                    # Listen for commands
+                    async for message in websocket:
+                        await self.handle_message(message)
+                        
+            except Exception as e:
+                print(f"Connection error: {e}")
+                await asyncio.sleep(5)  # Retry after 5 seconds
+
+# Usage
+if __name__ == "__main__":
+    client = NDIRouterClient("RaspberryPi_1", "Living Room Pi")
+    asyncio.run(client.run())
+```
+
+#### Testing Your Client
+
+1. **Start the bridge server:** `python start_server.py`
+2. **Run your custom client** (connects to port 8081)
+3. **Open web interface** at `http://localhost`
+4. **Verify** your component appears with its outputs
+
+Your custom client will appear in the web interface alongside TouchDesigner components, and can be controlled from the same unified interface!
+
+#### Info-Only Clients (Read-Only Mode)
+
+If you want to build a client that only displays information without contributing outputs (like the `NDI_NamedRouter_INFO` component):
+
+1. **Register as info client:**
+   ```json
+   {"action": "register_client", "client_type": "info", "auto_update": false}
+   ```
+
+2. **Explicitly request state when needed:**
+   ```json
+   {"action": "request_state"}
+   ```
+   The bridge will respond with the merged state from all controller components.
+
+3. **Toggle auto-updates dynamically:**
+   - Set `"auto_update": true` if you want periodic broadcasts (e.g., for live monitoring)
+   - Set `"auto_update": false` if you want to request updates only when needed (e.g., on-demand or timer-based)
+
+**Note:** Info-only clients don't send `state_update` messages - they only receive state from controller components.
 
 ### Security Considerations
 

@@ -157,7 +157,9 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
 
 # WebSocket Bridge for TouchDesigner
 browser_clients = set()
-td_clients = set()  # Support multiple TD clients
+td_clients = {}  # Map websocket -> component_id
+component_states = {}  # Map component_id -> latest state
+info_only_clients = set()  # Set of websockets that only want updates on request
 td_lock = asyncio.Lock()
 
 async def handle_browser_websocket(websocket, path):
@@ -167,15 +169,24 @@ async def handle_browser_websocket(websocket, path):
     browser_clients.add(websocket)
     
     try:
-        # Request initial state from first TD client if any connected
+        # Request initial state from all TD clients and send merged state
         async with td_lock:
             if td_clients:
-                try:
-                    first_td = next(iter(td_clients))
-                    await first_td.send(json.dumps({'action': 'request_state'}))
-                    print(f"[Bridge] Requested state from TD for new browser")
-                except:
-                    print(f"[Bridge] Failed to request state - TD may be disconnected")
+                # Request state from all TD clients
+                for td_socket in list(td_clients.keys()):
+                    try:
+                        await td_socket.send(json.dumps({'action': 'request_state'}))
+                    except:
+                        pass
+                print(f"[Bridge] Requested state from {len(td_clients)} TD clients for new browser")
+                
+                # Send currently merged state immediately
+                if component_states:
+                    merged_state = merge_component_states()
+                    await websocket.send(json.dumps({
+                        'action': 'state_update',
+                        'state': merged_state
+                    }))
         
         async for message in websocket:
             print(f"[Browser→TDs] {message[:100] if len(message) > 100 else message}")
@@ -183,24 +194,53 @@ async def handle_browser_websocket(websocket, path):
             # Don't forward error messages back (prevents loops)
             try:
                 msg_data = json.loads(message)
-                if msg_data.get('action') == 'error':
+                action = msg_data.get('action')
+                
+                if action == 'error':
                     print(f"[Bridge] Ignoring error echo from browser")
                     continue
+                    
+                # Route commands to specific component if component_id specified
+                if action in ['set_source', 'set_lock', 'set_lock_global', 'refresh_sources', 'save_configuration', 'recall_configuration']:
+                    component_id = msg_data.get('component_id')
+                    if component_id:
+                        # Send to specific component
+                        target_socket = None
+                        async with td_lock:
+                            for td_socket, cid in td_clients.items():
+                                if cid == component_id:
+                                    target_socket = td_socket
+                                    break
+                        
+                        if target_socket:
+                            try:
+                                await target_socket.send(message)
+                                print(f"[Bridge] Routed {action} to component {component_id}")
+                            except:
+                                print(f"[Bridge] Failed to send to component {component_id}")
+                        else:
+                            print(f"[Bridge] Component {component_id} not found")
+                            await websocket.send(json.dumps({
+                                'action': 'error',
+                                'message': f'Component {component_id} not connected'
+                            }))
+                        continue
             except:
                 pass
             
             async with td_lock:
                 if td_clients:
-                    # Forward to all TD clients
+                    # Forward to all TD clients for general messages
                     disconnected = []
-                    for td_client in list(td_clients):
+                    for td_socket in list(td_clients.keys()):
                         try:
-                            await td_client.send(message)
+                            await td_socket.send(message)
                         except:
                             print(f"[Bridge] Failed to send to TD client")
-                            disconnected.append(td_client)
-                    for td_client in disconnected:
-                        td_clients.discard(td_client)
+                            disconnected.append(td_socket)
+                    for td_socket in disconnected:
+                        if td_socket in td_clients:
+                            del td_clients[td_socket]
                 else:
                     print(f"[Bridge] ERROR: No TD clients connected")
                     await websocket.send(json.dumps({
@@ -212,17 +252,155 @@ async def handle_browser_websocket(websocket, path):
     finally:
         browser_clients.discard(websocket)
 
+def merge_component_states():
+    """Merge states from all TD components into a single state"""
+    if not component_states:
+        return {}
+    
+    # Start with first component's state as base
+    merged = {
+        'components': [],  # List of component info
+        'output_names': [],
+        'current_sources': [],
+        'regex_patterns': [],
+        'effective_regex_patterns': [],
+        'output_resolutions': [],
+        'locks': [],
+        'sources': [],  # Combined sources from all components
+        'lock_global': False,  # Any component globally locked?
+        'last_update': time.time()
+    }
+    
+    for component_id, state in component_states.items():
+        # Track which component each output belongs to
+        num_outputs = len(state.get('output_names', []))
+        
+        merged['components'].append({
+            'component_id': component_id,
+            'component_name': state.get('component_name', component_id),
+            'output_start_idx': len(merged['output_names']),
+            'output_count': num_outputs,
+            'lock_global': state.get('lock_global', False)
+        })
+        
+        # Append all outputs from this component
+        merged['output_names'].extend(state.get('output_names', []))
+        merged['current_sources'].extend(state.get('current_sources', []))
+        merged['regex_patterns'].extend(state.get('regex_patterns', []))
+        merged['effective_regex_patterns'].extend(state.get('effective_regex_patterns', []))
+        merged['output_resolutions'].extend(state.get('output_resolutions', []))
+        merged['locks'].extend(state.get('locks', []))
+        
+        # Combine sources (avoiding duplicates)
+        for source in state.get('sources', []):
+            if source not in merged['sources']:
+                merged['sources'].append(source)
+        
+        # If any component is globally locked, reflect that
+        if state.get('lock_global'):
+            merged['lock_global'] = True
+    
+    return merged
+
 async def handle_td_websocket(websocket, path):
     """Handle WebSocket connection from TouchDesigner"""
     client_addr = websocket.remote_address
     print(f"[TouchDesigner] Connected: {client_addr}")
     
+    component_id = None
+    
     async with td_lock:
-        td_clients.add(websocket)
+        # Initially register without component_id (will be updated on first state message)
+        td_clients[websocket] = None
         print(f"[Bridge] TD client added. Total TD clients: {len(td_clients)}, Total browsers: {len(browser_clients)}")
     
     try:
         async for message in websocket:
+            # Parse message to check for state updates
+            try:
+                msg_data = json.loads(message)
+                action = msg_data.get('action')
+                
+                if action == 'register_client':
+                    # Handle client registration (info-only clients, auto-update preference)
+                    client_type = msg_data.get('client_type', 'controller')
+                    auto_update = msg_data.get('auto_update', True)
+                    
+                    if client_type == 'info' and not auto_update:
+                        info_only_clients.add(websocket)
+                        print(f"[Bridge] Registered INFO client (auto-update OFF)")
+                    else:
+                        info_only_clients.discard(websocket)
+                        print(f"[Bridge] Registered client (auto-update ON)")
+                    continue
+                
+                elif action == 'state_update':
+                    # Extract and store component state
+                    state = msg_data.get('state', {})
+                    component_id = state.get('component_id')
+                    
+                    if component_id:
+                        async with td_lock:
+                            # Update component_id mapping
+                            td_clients[websocket] = component_id
+                            # Store this component's state
+                            component_states[component_id] = state
+                            print(f"[Bridge] Updated state for component '{component_id}'")
+                        
+                        # Create merged state and send to browsers
+                        merged_state = merge_component_states()
+                        merged_message = json.dumps({
+                            'action': 'state_update',
+                            'state': merged_state
+                        })
+                        
+                        # Send merged state to all browsers
+                        disconnected_browsers = []
+                        for browser in list(browser_clients):
+                            try:
+                                await browser.send(merged_message)
+                            except Exception as e:
+                                print(f"[Bridge] Failed to send to browser: {e}")
+                                disconnected_browsers.append(browser)
+                        for browser in disconnected_browsers:
+                            browser_clients.discard(browser)
+                        
+                        # Send to other TD clients ONLY if they want auto-updates
+                        disconnected_tds = []
+                        broadcast_count = 0
+                        for td_socket, td_id in list(td_clients.items()):
+                            if td_socket != websocket and td_socket not in info_only_clients:
+                                try:
+                                    await td_socket.send(merged_message)
+                                    broadcast_count += 1
+                                except Exception as e:
+                                    print(f"[Bridge] Failed to send to TD client: {e}")
+                                    disconnected_tds.append(td_socket)
+                        for td_socket in disconnected_tds:
+                            if td_socket in td_clients:
+                                del td_clients[td_socket]
+                        
+                        print(f"[Bridge] Broadcasted merged state to {len(browser_clients)} browsers and {broadcast_count} TD clients (auto-update)")
+                        continue
+                
+                elif action == 'request_state':
+                    # Respond to explicit state request from any client
+                    merged_state = merge_component_states()
+                    response = json.dumps({
+                        'action': 'state_update',
+                        'state': merged_state
+                    })
+                    try:
+                        await websocket.send(response)
+                        print(f"[Bridge] Sent state to requesting TD client")
+                    except Exception as e:
+                        print(f"[Bridge] Failed to send state to TD client: {e}")
+                    continue
+                        
+            except json.JSONDecodeError:
+                pass
+            
+            # For non-state-update messages, broadcast as before
             print(f"[TD→All] {message[:100] if len(message) > 100 else message}")
             
             # Broadcast to all browsers
@@ -236,26 +414,31 @@ async def handle_td_websocket(websocket, path):
             for browser in disconnected_browsers:
                 browser_clients.discard(browser)
             
-            # Also broadcast to other TD clients (excluding sender)
+            # Also broadcast to other TD clients (excluding sender and info-only clients)
             disconnected_tds = []
-            for td_client in list(td_clients):
-                if td_client != websocket:  # Don't send back to sender
+            for td_socket in list(td_clients.keys()):
+                if td_socket != websocket and td_socket not in info_only_clients:
                     try:
-                        await td_client.send(message)
+                        await td_socket.send(message)
                     except Exception as e:
                         print(f"[Bridge] Failed to send to TD client: {e}")
-                        disconnected_tds.append(td_client)
-            for td_client in disconnected_tds:
-                td_clients.discard(td_client)
-                
-            if browser_clients or (len(td_clients) > 1):
-                print(f"[Bridge] Broadcast to {len(browser_clients)} browsers and {len(td_clients)-1} other TD clients")
+                        disconnected_tds.append(td_socket)
+            for td_socket in disconnected_tds:
+                if td_socket in td_clients:
+                    del td_clients[td_socket]
                 
     except websockets.exceptions.ConnectionClosed:
         print(f"[TouchDesigner] Disconnected: {client_addr}")
     finally:
         async with td_lock:
-            td_clients.discard(websocket)
+            if websocket in td_clients:
+                component_id = td_clients[websocket]
+                del td_clients[websocket]
+                info_only_clients.discard(websocket)  # Remove from info-only set if present
+                # Clean up component state
+                if component_id and component_id in component_states:
+                    del component_states[component_id]
+                    print(f"[Bridge] Removed component '{component_id}'")
             print(f"[Bridge] TD client removed. Total TD clients: {len(td_clients)}")
 
 async def run_websocket_servers(browser_port, td_port):

@@ -19,6 +19,7 @@ class NDINamedRouterInfoExt:
 		# # Plural handling configuration
 		# self.enablePluralHandling = True
 
+		self.reconnectTimer = self.ownerComp.op('timer3')
 
 		# Connection settings
 		self.autoReconnect = True
@@ -85,6 +86,14 @@ class NDINamedRouterInfoExt:
 			self.timerActive = False
 		elif val:
 			self.timerActive = True
+		
+		# Update auto-update preference with bridge when parameter changes
+		if self.isConnected():
+			self.sendMessage({
+				'action': 'register_client',
+				'client_type': 'info',
+				'auto_update': val
+			})
 	
 	def onParUpdateonstart(self, val):
 		if not self.isPeriodicUpdate and not val:
@@ -183,17 +192,29 @@ class NDINamedRouterInfoExt:
 	def _sendPing(self):
 		"""Internal method to send ping to server"""
 		return self.sendMessage({'action': 'ping'})
+
+	def onReconnectTimerTrigger(self):
+		"""TouchDesigner callback when reconnect timer done"""
+		self.ownerComp.par.Restart.pulse()
 	
 	# WebSocket event handlers (called from websocket callbacks)
 	def onWebSocketConnect(self, dat):
 		"""Called when WebSocket connection is established"""
 		debug('[NDI Info Ext] Connected to NDI Named Router server')
+		# Register as info-only client with auto-update preference
+		self.sendMessage({
+			'action': 'register_client',
+			'client_type': 'info',
+			'auto_update': self.isPeriodicUpdate  # Only get broadcasts if periodic updates are enabled
+		})
 		# Request initial state from server
+		self.reconnectTimer.par.initialize.pulse()
 		self._requestState()
 	
 	def onWebSocketDisconnect(self, dat):
 		"""Called when WebSocket connection is closed"""
 		debug('[NDI Info Ext] Disconnected from NDI Named Router server')
+		self.reconnectTimer.par.start.pulse()
 	
 	def onWebSocketReceiveText(self, dat, message):
 		"""Called when text message is received from server"""
@@ -302,7 +323,6 @@ class NDINamedRouterInfoExt:
 	# 		self.reconnectTimer = 0
 	
 	# Parameter callbacks
-
 	
 	def onParRequeststate(self):
 		"""Called when Request State parameter is pulsed"""
