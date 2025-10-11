@@ -157,28 +157,28 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
 
 # WebSocket Bridge for TouchDesigner
 browser_clients = set()
-td_client = None
+td_clients = set()  # Support multiple TD clients
 td_lock = asyncio.Lock()
 
 async def handle_browser_websocket(websocket, path):
     """Handle WebSocket connections from browsers"""
-    global td_client
     client_addr = websocket.remote_address
     print(f"[Browser] Connected: {client_addr}")
     browser_clients.add(websocket)
     
     try:
-        # Request initial state from TD if connected
+        # Request initial state from first TD client if any connected
         async with td_lock:
-            if td_client is not None:
+            if td_clients:
                 try:
-                    await td_client.send(json.dumps({'action': 'request_state'}))
+                    first_td = next(iter(td_clients))
+                    await first_td.send(json.dumps({'action': 'request_state'}))
                     print(f"[Bridge] Requested state from TD for new browser")
                 except:
                     print(f"[Bridge] Failed to request state - TD may be disconnected")
         
         async for message in websocket:
-            print(f"[Browser→TD] {message[:100] if len(message) > 100 else message}")
+            print(f"[Browser→TDs] {message[:100] if len(message) > 100 else message}")
             
             # Don't forward error messages back (prevents loops)
             try:
@@ -190,17 +190,19 @@ async def handle_browser_websocket(websocket, path):
                 pass
             
             async with td_lock:
-                if td_client is not None:
-                    try:
-                        await td_client.send(message)
-                    except:
-                        print(f"[Bridge] ERROR: Failed to send to TD - it may be disconnected")
-                        await websocket.send(json.dumps({
-                            'action': 'error',
-                            'message': 'TouchDesigner not connected'
-                        }))
+                if td_clients:
+                    # Forward to all TD clients
+                    disconnected = []
+                    for td_client in list(td_clients):
+                        try:
+                            await td_client.send(message)
+                        except:
+                            print(f"[Bridge] Failed to send to TD client")
+                            disconnected.append(td_client)
+                    for td_client in disconnected:
+                        td_clients.discard(td_client)
                 else:
-                    print(f"[Bridge] ERROR: TD not connected, cannot forward message")
+                    print(f"[Bridge] ERROR: No TD clients connected")
                     await websocket.send(json.dumps({
                         'action': 'error',
                         'message': 'TouchDesigner not connected'
@@ -212,34 +214,49 @@ async def handle_browser_websocket(websocket, path):
 
 async def handle_td_websocket(websocket, path):
     """Handle WebSocket connection from TouchDesigner"""
-    global td_client
     client_addr = websocket.remote_address
     print(f"[TouchDesigner] Connected: {client_addr}")
     
     async with td_lock:
-        td_client = websocket
-        print(f"[Bridge] TD client registered. Total browsers: {len(browser_clients)}")
+        td_clients.add(websocket)
+        print(f"[Bridge] TD client added. Total TD clients: {len(td_clients)}, Total browsers: {len(browser_clients)}")
     
     try:
         async for message in websocket:
-            print(f"[TD→Browsers ({len(browser_clients)})] {message[:100] if len(message) > 100 else message}")
+            print(f"[TD→All] {message[:100] if len(message) > 100 else message}")
+            
             # Broadcast to all browsers
-            disconnected = []
+            disconnected_browsers = []
             for browser in list(browser_clients):
                 try:
                     await browser.send(message)
-                    print(f"[Bridge] Sent to browser: {browser.remote_address}")
                 except Exception as e:
                     print(f"[Bridge] Failed to send to browser: {e}")
-                    disconnected.append(browser)
-            for browser in disconnected:
+                    disconnected_browsers.append(browser)
+            for browser in disconnected_browsers:
                 browser_clients.discard(browser)
+            
+            # Also broadcast to other TD clients (excluding sender)
+            disconnected_tds = []
+            for td_client in list(td_clients):
+                if td_client != websocket:  # Don't send back to sender
+                    try:
+                        await td_client.send(message)
+                    except Exception as e:
+                        print(f"[Bridge] Failed to send to TD client: {e}")
+                        disconnected_tds.append(td_client)
+            for td_client in disconnected_tds:
+                td_clients.discard(td_client)
+                
+            if browser_clients or (len(td_clients) > 1):
+                print(f"[Bridge] Broadcast to {len(browser_clients)} browsers and {len(td_clients)-1} other TD clients")
+                
     except websockets.exceptions.ConnectionClosed:
         print(f"[TouchDesigner] Disconnected: {client_addr}")
     finally:
         async with td_lock:
-            td_client = None
-            print(f"[Bridge] TD client cleared")
+            td_clients.discard(websocket)
+            print(f"[Bridge] TD client removed. Total TD clients: {len(td_clients)}")
 
 async def run_websocket_servers(browser_port, td_port):
     """Run both WebSocket servers"""

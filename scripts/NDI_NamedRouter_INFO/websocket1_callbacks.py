@@ -25,6 +25,7 @@ def onDisconnect(dat):
 
 def onReceiveText(dat, rowIndex, message):
 	"""Called when text message is received from server"""
+	debug(message)
 	ext = getExtension()
 	if ext:
 		ext.onWebSocketReceiveText(dat, message)
