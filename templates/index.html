@@ -404,7 +404,7 @@
         
         // Use the same host as the web page for WebSocket connection
         const WS_HOST = window.location.hostname;
-        const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port
+        const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port (direct connection)
         const WS_URL = `ws://${WS_HOST}:${WS_PORT}`;
         
         console.log(`WebSocket URL: ${WS_URL}`);
@@ -461,7 +461,12 @@
         }
 
         function handleMessage(data) {
+            console.log('Handling message:', data);
+            
             if (data.action === 'state_update') {
+                console.log('Received state update:', data.state);
+                console.log('Output names:', data.state.output_names);
+                console.log('Sources:', data.state.sources);
                 currentState = data.state;
                 updateUI();
             } else if (data.action === 'source_changed') {
@@ -504,10 +509,15 @@
         }
 
         function updateUI() {
+            console.log('Updating UI with current state:', currentState);
             const container = document.getElementById('blocksContainer');
             const lastUpdateElement = document.getElementById('lastUpdate');
             
+            console.log('Output names check:', currentState.output_names);
+            console.log('Output names length:', currentState.output_names ? currentState.output_names.length : 'undefined');
+            
             if (!currentState.output_names || currentState.output_names.length === 0) {
+                console.log('No output names found, showing "No source blocks configured" message');
                 container.innerHTML = '<div class="loading">No source blocks configured</div>';
                 return;
             }

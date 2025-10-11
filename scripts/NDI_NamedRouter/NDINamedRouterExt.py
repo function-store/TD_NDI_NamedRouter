@@ -1,8 +1,8 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.51.toe
-Saveversion : 2023.11340
+Saveorigin : NDI_NamedRouter.53.toe
+Saveversion : 2023.11880
 Info Header End'''
 import re
 import json
@@ -397,7 +397,7 @@ class WebHandler:
 	def __init__(self, extension):
 		self.extension = extension
 		
-		self.webServerDAT : webserverDAT = self.extension.ownerComp.op('webserver1')
+		self.webSocketDAT : webSocketDAT = self.extension.ownerComp.op('websocket1')
 		self.connected_clients = set()  # Track connected clients
 		
 	def addClient(self, client):
@@ -410,12 +410,12 @@ class WebHandler:
 		self.connected_clients.discard(client)
 		debug(f'Client removed. Total clients: {len(self.connected_clients)}')
 		
-	def broadcastToAll(self, message, webServerDAT=None):
+	def broadcastToAll(self, message, webSocketDAT=None):
 		"""Send message to all connected clients"""
-		if webServerDAT is None:
-			webServerDAT = self.webServerDAT
+		if webSocketDAT is None:
+			webSocketDAT = self.webSocketDAT
 			
-		if not webServerDAT:
+		if not webSocketDAT:
 			debug('ERROR: No WebServer DAT available for broadcasting')
 			return
 			
@@ -423,7 +423,7 @@ class WebHandler:
 		clients_to_remove = []
 		for client in self.connected_clients:
 			try:
-				webServerDAT.webSocketSendText(client, message)
+				webSocketDAT.sendText( message)
 			except Exception as e:
 				debug(f'Failed to send to client {client}: {e}')
 				clients_to_remove.append(client)
@@ -434,7 +434,7 @@ class WebHandler:
 		
 		debug(f'Message sent to {len(self.connected_clients)} clients')
 		
-	def broadcastStateUpdate(self, webServerDAT=None):
+	def broadcastStateUpdate(self, webSocketDAT=None):
 		"""Broadcast current state to all connected WebSocket clients"""
 		if not self.connected_clients:
 			debug('No connected clients to broadcast to')
@@ -451,12 +451,12 @@ class WebHandler:
 			}
 			message = json.dumps(response)
 			debug(f'Broadcasting state: {message[:200]}...')
-			self.broadcastToAll(message, webServerDAT)
+			self.broadcastToAll(message, webSocketDAT)
 			debug('State broadcast completed')
 		else:
 			debug('WARNING: Extension not found for broadcast')
 			
-	def broadcastSourceChange(self, block_idx, source_name, webServerDAT=None):
+	def broadcastSourceChange(self, block_idx, source_name, webSocketDAT=None):
 		"""Broadcast source change to all connected WebSocket clients"""
 		if not self.connected_clients:
 			debug('No connected clients to broadcast to')
@@ -471,10 +471,10 @@ class WebHandler:
 		}
 		message = json.dumps(response)
 		debug(f'Source change broadcast message: {response}')
-		self.broadcastToAll(message, webServerDAT)
+		self.broadcastToAll(message, webSocketDAT)
 		debug('Source change broadcast completed')
 		
-	def sendInitialState(self, webServerDAT, client):
+	def sendInitialState(self, webSocketDAT, client):
 		"""Send initial state to a newly connected client"""
 		debug('Sending initial state to newly connected client')
 		
@@ -487,12 +487,12 @@ class WebHandler:
 				'state': state
 			}
 			debug(f'Sending state response: {json.dumps(response)[:200]}...')
-			webServerDAT.webSocketSendText(client, json.dumps(response))
+			webSocketDAT.sendText( json.dumps(response))
 			debug('Initial state sent to connected client')
 		else:
 			debug('WARNING: Extension not found, cannot send initial state')
 			
-	def handleMessage(self, webServerDAT, client, message):
+	def handleMessage(self, webSocketDAT, client, message):
 		"""Handle incoming WebSocket messages"""
 		#debug(f'Handling message: {message}')
 		
@@ -508,7 +508,7 @@ class WebHandler:
 					'action': 'error',
 					'message': 'NDI Named Switcher extension not found'
 				}
-				webServerDAT.webSocketSendText(client, json.dumps(error_response))
+				webSocketDAT.sendText( json.dumps(error_response))
 				return
 			
 			if action == 'request_state':
@@ -520,7 +520,7 @@ class WebHandler:
 					'state': state
 				}
 				debug(f'Sending state response for request: {json.dumps(response)[:200]}...')
-				webServerDAT.webSocketSendText(client, json.dumps(response))
+				webSocketDAT.sendText( json.dumps(response))
 				debug('State response sent successfully')
 				
 			elif action == 'set_source':
@@ -543,7 +543,7 @@ class WebHandler:
 							'state': state
 						}
 						debug(f'Sending updated state: {json.dumps(response)[:200]}...')
-						webServerDAT.webSocketSendText(client, json.dumps(response))
+						webSocketDAT.sendText( json.dumps(response))
 						debug('Updated state sent successfully')
 					else:
 						debug('Set source failed, sending error response')
@@ -551,14 +551,14 @@ class WebHandler:
 							'action': 'error',
 							'message': f'Failed to set source for block {block_idx}'
 						}
-						webServerDAT.webSocketSendText(client, json.dumps(error_response))
+						webSocketDAT.sendText( json.dumps(error_response))
 				else:
 					debug('Invalid set_source parameters, sending error response')
 					error_response = {
 						'action': 'error',
 						'message': 'Invalid set_source parameters'
 					}
-					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+					webSocketDAT.sendText( json.dumps(error_response))
 			
 			elif action == 'refresh_sources':
 				debug('Processing refresh_sources action')
@@ -574,7 +574,7 @@ class WebHandler:
 						'state': state
 					}
 					debug(f'Sending refreshed state: {json.dumps(response)[:200]}...')
-					webServerDAT.webSocketSendText(client, json.dumps(response))
+					webSocketDAT.sendText( json.dumps(response))
 					debug('Refreshed state sent successfully')
 				else:
 					debug('Refresh sources failed, sending error response')
@@ -582,7 +582,7 @@ class WebHandler:
 						'action': 'error',
 						'message': 'Failed to refresh sources'
 					}
-					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+					webSocketDAT.sendText( json.dumps(error_response))
 			
 			elif action == 'save_configuration':
 				debug('Processing save_configuration action')
@@ -598,7 +598,7 @@ class WebHandler:
 						'message': 'Configuration saved successfully'
 					}
 					debug('Sending configuration saved response')
-					webServerDAT.webSocketSendText(client, json.dumps(response))
+					webSocketDAT.sendText( json.dumps(response))
 					debug('Configuration saved response sent successfully')
 				else:
 					debug('Save configuration failed, sending error response')
@@ -606,7 +606,7 @@ class WebHandler:
 						'action': 'error',
 						'message': 'Failed to save configuration'
 					}
-					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+					webSocketDAT.sendText( json.dumps(error_response))
 			
 			elif action == 'recall_configuration':
 				debug('Processing recall_configuration action')
@@ -622,7 +622,7 @@ class WebHandler:
 						'message': 'Configuration recalled successfully'
 					}
 					debug('Sending configuration recalled response')
-					webServerDAT.webSocketSendText(client, json.dumps(response))
+					webSocketDAT.sendText( json.dumps(response))
 					debug('Configuration recalled response sent successfully')
 				else:
 					debug('Recall configuration failed, sending error response')
@@ -630,7 +630,7 @@ class WebHandler:
 						'action': 'error',
 						'message': 'Failed to recall configuration'
 					}
-					webServerDAT.webSocketSendText(client, json.dumps(error_response))
+					webSocketDAT.sendText( json.dumps(error_response))
 			
 			elif action == 'ping':
 				#debug('Processing ping action')
@@ -639,8 +639,12 @@ class WebHandler:
 					'timestamp': time.time()
 				}
 				#debug('Sending pong response')
-				webServerDAT.webSocketSendText(client, json.dumps(pong_response))
+				webSocketDAT.sendText( json.dumps(pong_response))
 				#debug('Pong response sent')
+			
+			elif action == 'error':
+				# Ignore error messages (they're informational only, don't respond)
+				debug(f'Error message received: {data.get("message")}')
 			
 			else:
 				debug(f'Unknown action received: {action}')
@@ -648,7 +652,7 @@ class WebHandler:
 					'action': 'error',
 					'message': f'Unknown action: {action}'
 				}
-				webServerDAT.webSocketSendText(client, json.dumps(error_response))
+				webSocketDAT.sendText( json.dumps(error_response))
 		
 		except Exception as e:
 			debug(f'Exception in handleMessage: {e}')
@@ -656,7 +660,7 @@ class WebHandler:
 				'action': 'error',
 				'message': f'Error processing message: {str(e)}'
 			}
-			webServerDAT.webSocketSendText(client, json.dumps(error_response))
+			webSocketDAT.sendText( json.dumps(error_response))
 
 	def _outputResolution(self, block_idx):
 		return self.mapping[block_idx].par.Resx.eval(), self.mapping[block_idx].par.Resy.eval()

@@ -103,17 +103,51 @@ The system automatically handles source name variations:
 
 ## Technical Overview
 
+### System Architecture
+
+The NDI Named Router uses a **WebSocket bridge** architecture to enable communication between browsers and TouchDesigner:
+
+```
+Browser (client) ←→ Bridge Server ←→ TouchDesigner (client)
+    Port 8080          start_server.py         Port 8081
+```
+
+**Why a bridge?** TouchDesigner's WebSocket DAT can only connect OUT as a client (not listen for connections). Web browsers are also clients. Since two clients cannot connect directly to each other, the bridge server acts as the intermediary, listening for connections from both sides and forwarding messages between them.
+
 ### System Components
 
 - **TouchDesigner Component**: Handles NDI routing and video processing
-- **Web Server**: Serves the web interface to browsers  
-- **WebSocket Communication**: Real-time updates between TouchDesigner and web interface
+- **HTTP Server**: Serves the web interface to browsers (default port 80)
+- **WebSocket Bridge**: Real-time bidirectional communication server
+  - **Browser Port (8080)**: Web interface connects here
+  - **TouchDesigner Port (8081)**: TD WebSocket DAT connects here
+  - Forwards messages between browsers and TouchDesigner
 
 ### Network Requirements
 
-- **Local Network**: All devices must be on the same network (WiFi or Ethernet)
-- **Firewall**: Ports 80 (web) and 8080 (WebSocket) must be accessible
+- **Local Network**: All devices must be on the same network (WiFi or Ethernet) for local operation
+- **Firewall Ports**: 
+  - Port 80 (or custom): HTTP web interface
+  - Port 8080: Browser WebSocket connections
+  - Port 8081: TouchDesigner WebSocket connection
 - **NDI Network**: NDI sources must be discoverable on the same network segment
+
+### Deployment Options
+
+#### Local Operation (Default)
+- Everything runs on one machine
+- TouchDesigner and web server on same computer
+- Access web interface from any device on local network
+- ✅ Easiest setup, no special networking required
+
+#### Remote Server Deployment
+- Web server runs on remote server (cloud, dedicated machine, etc.)
+- TouchDesigner connects to remote server
+- Web interface accessible from anywhere
+- ⚠️ Requires: 
+  - Public IP or VPN for TouchDesigner to reach server
+  - Open firewall ports on remote server
+  - Consider security (see Security section below)
 
 ## Installation and Setup
 
@@ -124,38 +158,60 @@ The system automatically handles source name variations:
 3. **Define Patterns**: Configure name matching patterns for automatic routing
 4. **Connect NDI Sources**: Ensure your NDI sources are properly configured and broadcasting
 
-### 2. Optional Web Server Setup
+### 2. Web Server Setup
+
+The web server includes both HTTP (for the interface) and WebSocket bridge (for TD communication):
 
 ```bash
-# Basic startup (uses default ports)
+# Basic startup (default ports: HTTP=80, Browser WS=8080, TD=8081)
 python start_server.py
 
-# Custom ports if needed
-python start_server.py --port 8090 --websocket-port 9000
+# Custom ports
+python start_server.py --port 8090 --websocket-port 9000 --td-port 9001
 
 # Don't open browser automatically  
 python start_server.py --no-browser
+
+# Auto-find available HTTP port if 80 is in use
+python start_server.py --find-port
 ```
 
-### 3. Access from Other Devices
+**Default Ports:**
+- **80**: HTTP web interface
+- **8080**: Browser WebSocket connections
+- **8081**: TouchDesigner WebSocket connection
 
-The server shows network access URLs when it starts:
+### 3. TouchDesigner WebSocket Configuration
+
+Configure the WebSocket DAT in the NDI_NamedRouter component:
+
+**Parameters:**
+- **Network Address**: `localhost` (or your server's IP/domain for remote)
+- **Port**: `8081` (or your `--td-port` value)
+- **Active**: ✓ (checked)
+- **Callbacks DAT**: Should already point to `websocket1_callbacks`
+
+The WebSocket DAT connects as a **client** to the bridge server. Once connected, you'll see `[TouchDesigner] Connected` in the server console.
+
+### 4. Access from Other Devices
+
+The server displays access URLs when it starts:
 ```
 Local Access: http://localhost:80
 Network Access: http://192.168.1.123:80
+Hostname: http://your-computer-name.local:80
 ```
 
-Use the network address to connect from other devices.
-
-### 4. Component Configuration
-
-The TouchDesigner component handles WebSocket communication automatically. Simply ensure it matches the server's WebSocket port (default: 8080).
+Use the network address or hostname to connect from other devices on your network.
 
 ### 5. Firewall Configuration
 
 Ensure these ports are accessible:
-- **Port 80**: Web interface (HTTP)
-- **Port 8080**: TouchDesigner communication (WebSocket)
+- **Port 80** (or custom): HTTP web interface
+- **Port 8080**: Browser WebSocket connections  
+- **Port 8081**: TouchDesigner WebSocket connection
+
+For remote access, these ports must be open on your server and reachable from TouchDesigner's location.
 
 ## Advanced Configuration
 
@@ -179,15 +235,39 @@ Access via: `http://ndi-router`
 
 ### WebSocket API
 
+The bridge server forwards JSON messages between browsers and TouchDesigner.
+
 **Messages from Web Interface to TouchDesigner:**
-- `request_state`: Request current system state
-- `set_source`: Assign a source to an output
-- `refresh_sources`: Refresh source mappings
+```json
+{"action": "request_state"}
+{"action": "set_source", "block_idx": 0, "source_name": "Camera 1"}
+{"action": "refresh_sources"}
+{"action": "ping"}
+```
 
 **Messages from TouchDesigner to Web Interface:**
-- `state_update`: Full system state update
-- `source_changed`: Source assignment notification
-- `error`: Error messages
+```json
+{"action": "state_update", "state": {...}}
+{"action": "source_changed", "block_idx": 0, "source_name": "Camera 1"}
+{"action": "error", "message": "Error description"}
+{"action": "pong"}
+```
+
+### Security Considerations
+
+**Current Implementation:**
+- Uses unencrypted WebSocket (`ws://`) - messages are sent in plain text
+- No authentication - anyone who can reach the server can control routing
+- Suitable for trusted local networks
+
+**For Production/Remote Deployment:**
+1. **Use WSS (WebSocket Secure)**: Encrypt WebSocket traffic with TLS/SSL
+2. **Add Authentication**: Implement login system or API keys
+3. **Network Isolation**: Use VPN or restrict access via firewall rules
+4. **HTTPS**: Serve web interface over HTTPS instead of HTTP
+5. **Rate Limiting**: Add rate limiting to prevent abuse
+
+The current implementation prioritizes simplicity for local network use. Contact the developer if you need a production-ready secure version.
 
 ## Troubleshooting
 
@@ -196,16 +276,37 @@ Access via: `http://ndi-router`
 **Web Interface Not Loading:**
 - Ensure web server is running: `python start_server.py`
 - Try local URL first: `http://localhost`
-- Check firewall settings for port 80
+- Check firewall settings for HTTP port (default: 80)
+- Look for errors in the server console
 
 **WebSocket Connection Failed:**
-- Verify TouchDesigner component is active and properly loaded
-- Check that server WebSocket port matches component configuration
+1. **Check Server Console**: Look for `[TouchDesigner] Connected` message
+   - If missing: TouchDesigner isn't connecting to port 8081
+2. **Verify WebSocket DAT Settings**:
+   - Network Address: `localhost` (or server IP)
+   - Port: `8081` (must match `--td-port`)
+   - Active: ✓ checked
+3. **Check Browser Connection**: 
+   - Open browser Developer Tools (F12) → Console
+   - Look for WebSocket connection messages
+   - Should connect to port 8080
+
+**Error Spam in TouchDesigner:**
+- If you see repeated "TouchDesigner not connected" errors:
+  - TouchDesigner hasn't connected to the bridge yet
+  - Verify WebSocket DAT port is `8081` not `8080`
+  - Restart the TouchDesigner project to reload Python scripts
+
+**Bridge Not Forwarding Messages:**
+- Check server console for `[Browser→TD]` and `[TD→Browsers]` messages
+- If messages appear but don't forward, restart server
+- Ensure only ONE TouchDesigner instance is connected
 
 **Network Access Problems:**
-- Verify all devices are on same network
-- Check firewall allows ports 80 and 8080
+- Verify all devices are on same network (for local access)
+- Check firewall allows ports 80, 8080, and 8081
 - Try temporarily disabling firewall to test
+- For remote access, verify public IP/VPN connectivity
 
 **No Sources Showing:**
 - Check NDI sources are properly configured and broadcasting
@@ -336,7 +437,10 @@ if ext.isUpdateOnStart:
 ### Setup Instructions
 
 1. **Add Component**: Place the `NDI_NamedRouter_INFO` component in your TouchDesigner project
-2. **Configure Connection**: The WebSocketDAT should connect to `localhost:8080` (or your server's address/port)
+2. **Configure Connection**: The WebSocketDAT should connect to `localhost:8081` (or your server's address/port)
+   - **Network Address**: `localhost` (or remote server address)
+   - **Port**: `8081` (TouchDesigner port, NOT the browser port 8080)
+   - **Active**: ✓ checked
 3. **Configure Update Mode**: Set `Update` parameter for periodic updates or leave `Update On Start` for one-time initialization
 4. **Automatic Connection**: The component will automatically connect and request data based on your update settings
 5. **Access Data**: Use `ext.Outputs.outputname` or `ext.ownerComp.Info['Output Name']` to access information, for example `op.NDI_INFO.Outputs.projector.resx`
@@ -359,10 +463,11 @@ op('resolution1').par.h = op.NDI_INFO.Outputs.projector.resy
 ### NDI_NamedRouter_INFO Troubleshooting
 
 **Component Not Receiving Data:**
-- Check that the main NDI Named Router server is running
-- Verify WebSocket connection to `localhost:8080` (or correct server address)
+- Check that the main NDI Named Router server is running (`python start_server.py`)
+- Verify WebSocket connection to `localhost:8081` (NOT 8080 - that's for browsers only)
 - Enable "Debug Messages" parameter to see connection status
 - Try pulsing "Request State" parameter to manually request data
+- Check server console for `[TouchDesigner] Connected` message
 
 **Output Data Not Available:**
 - Ensure output names match exactly (case-sensitive)

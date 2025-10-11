@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Simple startup script for NDI Named Router Web Interface
-Starts a static file server to serve the web interface
+Starts HTTP server to serve the web interface + WebSocket bridge
+TouchDesigner connects to the bridge as a CLIENT
 """
 
 import http.server
@@ -14,6 +15,9 @@ import time
 import socket
 import platform
 import argparse
+import asyncio
+import websockets
+import json
 
 def get_local_ip():
     """Get the local IP address for network access"""
@@ -91,8 +95,8 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
                     
                     # Replace the WebSocket port placeholder with the actual port
                     html_content = html_content.replace(
-                        "const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port",
-                        f"const WS_PORT = '{websocket_port}';  // TouchDesigner WebSocket DAT port"
+                        "const WS_PORT = '8080';  // TouchDesigner WebSocket DAT port (direct connection)",
+                        f"const WS_PORT = '{websocket_port}';  // TouchDesigner WebSocket DAT port (direct connection)"
                     )
                     
                     self.wfile.write(html_content.encode('utf-8'))
@@ -151,6 +155,103 @@ def start_server(port=80, websocket_port=8080, auto_open=True):
         else:
             print(f"Error starting server: {e}")
 
+# WebSocket Bridge for TouchDesigner
+browser_clients = set()
+td_client = None
+td_lock = asyncio.Lock()
+
+async def handle_browser_websocket(websocket, path):
+    """Handle WebSocket connections from browsers"""
+    global td_client
+    client_addr = websocket.remote_address
+    print(f"[Browser] Connected: {client_addr}")
+    browser_clients.add(websocket)
+    
+    try:
+        # Request initial state from TD if connected
+        async with td_lock:
+            if td_client is not None:
+                try:
+                    await td_client.send(json.dumps({'action': 'request_state'}))
+                    print(f"[Bridge] Requested state from TD for new browser")
+                except:
+                    print(f"[Bridge] Failed to request state - TD may be disconnected")
+        
+        async for message in websocket:
+            print(f"[Browser→TD] {message[:100] if len(message) > 100 else message}")
+            
+            # Don't forward error messages back (prevents loops)
+            try:
+                msg_data = json.loads(message)
+                if msg_data.get('action') == 'error':
+                    print(f"[Bridge] Ignoring error echo from browser")
+                    continue
+            except:
+                pass
+            
+            async with td_lock:
+                if td_client is not None:
+                    try:
+                        await td_client.send(message)
+                    except:
+                        print(f"[Bridge] ERROR: Failed to send to TD - it may be disconnected")
+                        await websocket.send(json.dumps({
+                            'action': 'error',
+                            'message': 'TouchDesigner not connected'
+                        }))
+                else:
+                    print(f"[Bridge] ERROR: TD not connected, cannot forward message")
+                    await websocket.send(json.dumps({
+                        'action': 'error',
+                        'message': 'TouchDesigner not connected'
+                    }))
+    except websockets.exceptions.ConnectionClosed:
+        print(f"[Browser] Disconnected: {client_addr}")
+    finally:
+        browser_clients.discard(websocket)
+
+async def handle_td_websocket(websocket, path):
+    """Handle WebSocket connection from TouchDesigner"""
+    global td_client
+    client_addr = websocket.remote_address
+    print(f"[TouchDesigner] Connected: {client_addr}")
+    
+    async with td_lock:
+        td_client = websocket
+        print(f"[Bridge] TD client registered. Total browsers: {len(browser_clients)}")
+    
+    try:
+        async for message in websocket:
+            print(f"[TD→Browsers ({len(browser_clients)})] {message[:100] if len(message) > 100 else message}")
+            # Broadcast to all browsers
+            disconnected = []
+            for browser in list(browser_clients):
+                try:
+                    await browser.send(message)
+                    print(f"[Bridge] Sent to browser: {browser.remote_address}")
+                except Exception as e:
+                    print(f"[Bridge] Failed to send to browser: {e}")
+                    disconnected.append(browser)
+            for browser in disconnected:
+                browser_clients.discard(browser)
+    except websockets.exceptions.ConnectionClosed:
+        print(f"[TouchDesigner] Disconnected: {client_addr}")
+    finally:
+        async with td_lock:
+            td_client = None
+            print(f"[Bridge] TD client cleared")
+
+async def run_websocket_servers(browser_port, td_port):
+    """Run both WebSocket servers"""
+    print(f"[WebSocket] Starting browser WebSocket on port {browser_port}")
+    print(f"[WebSocket] Starting TD WebSocket on port {td_port}")
+    
+    browser_server = await websockets.serve(handle_browser_websocket, "0.0.0.0", browser_port)
+    td_server = await websockets.serve(handle_td_websocket, "0.0.0.0", td_port)
+    
+    print(f"[WebSocket] Servers ready!")
+    await asyncio.Future()  # Run forever
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -158,12 +259,17 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python start_server.py                           # Default ports: HTTP=80, WebSocket=8080
-  python start_server.py --port 8090              # Custom HTTP port, default WebSocket port
-  python start_server.py --websocket-port 9000    # Custom WebSocket port, default HTTP port
-  python start_server.py -p 3000 -w 9000          # Custom HTTP and WebSocket ports
+  python start_server.py                           # Default: HTTP=80, Browser WS=8080, TD=8081
+  python start_server.py --port 8090              # Custom HTTP port
+  python start_server.py -w 9000 -t 9001         # Custom WebSocket ports
   python start_server.py --no-browser             # Don't open browser automatically
-  python start_server.py -p 8090 -w 9000 --no-browser  # All custom settings
+  
+TouchDesigner Setup:
+  WebSocket DAT connects as a CLIENT to the bridge server:
+    - Network Address: localhost
+    - Port: 8081 (or your --td-port value)
+    - Active: ✓
+    - Callbacks: Point to websocket1_callbacks
         """
     )
     
@@ -178,7 +284,14 @@ Examples:
         '-w', '--websocket-port',
         type=int,
         default=8080,
-        help='Port number for TouchDesigner WebSocket DAT (default: 8080)'
+        help='Port number for browser WebSocket connections (default: 8080)'
+    )
+    
+    parser.add_argument(
+        '-t', '--td-port',
+        type=int,
+        default=8081,
+        help='Port number for TouchDesigner to connect to (default: 8081)'
     )
     
     parser.add_argument(
@@ -201,19 +314,32 @@ def main():
     
     print("=" * 60)
     print("NDI Named Router Web Interface")
-    print("Static File Server (No Dependencies Required)")
+    print("HTTP + WebSocket Bridge Server")
     print("=" * 60)
+    
+    # Start WebSocket servers in background thread
+    def run_ws_servers():
+        asyncio.run(run_websocket_servers(args.websocket_port, args.td_port))
+    
+    ws_thread = threading.Thread(target=run_ws_servers, daemon=True)
+    ws_thread.start()
+    time.sleep(0.5)  # Let WebSocket servers start
     
     # Check for local URL options
     hostname = get_local_hostname()
-    print(f"\n🌐 LOCAL ACCESS OPTIONS:")
+    print(f"\nLOCAL ACCESS OPTIONS:")
     print(f"1. localhost: http://localhost:{args.port}")
     print(f"2. IP address: http://[YOUR_IP]:{args.port} (shown when server starts)")
     print(f"3. Hostname: http://{hostname}.local:{args.port} (works on most modern networks)")
-    print(f"4. Custom local domain: Edit your hosts file for custom names")
     print()
-    print(f"📡 TOUCHDESIGNER WEBSOCKET:")
-    print(f"Configure your TouchDesigner WebSocket DAT to port {args.websocket_port}")
+    print(f"TOUCHDESIGNER CONFIGURATION:")
+    print(f"  WebSocket DAT Settings:")
+    print(f"    - Network Address: localhost")
+    print(f"    - Port: {args.td_port}")
+    print(f"    - Active: ✓")
+    print(f"    - Callbacks DAT: websocket1_callbacks")
+    print()
+    print(f"BROWSER CONNECTS TO: ws://localhost:{args.websocket_port}")
     print("=" * 60)
     
     # Check current directory
@@ -238,14 +364,15 @@ def main():
         print(f"Templates directory contents: {os.listdir('templates')}")
         return
     
-    print("✓ Web interface files found")
-    print("✓ No external dependencies required")
+    print("Web interface files found")
+    print("No external dependencies required")
     print()
     
     # Show configuration
     print(f"Configuration:")
     print(f"  HTTP Port: {args.port}")
-    print(f"  WebSocket Port: {args.websocket_port}")
+    print(f"  Browser WebSocket Port: {args.websocket_port}")
+    print(f"  TouchDesigner Port: {args.td_port}")
     print(f"  Auto-open browser: {'No' if args.no_browser else 'Yes'}")
     print(f"  Find available port: {'Yes' if args.find_port else 'No'}")
     print()
