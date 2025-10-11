@@ -512,6 +512,23 @@ if __name__ == "__main__":
 
 Your custom client will appear in the web interface alongside TouchDesigner components, and can be controlled from the same unified interface!
 
+#### Real-World Example: Raspberry Pi NDI Receiver
+
+The **[RpiSimpleNDI](../../../RpiSimpleNDI)** project implements a complete NDI receiver client for Raspberry Pi that integrates with this bridge.
+
+**Quick Setup:**
+```bash
+# On Raspberry Pi
+python3 ndi_receiver.py \
+  --config config.led_screen.json \
+  --router-bridge ws://192.168.1.100:8081 \
+  --router-name "LED Wall Main"
+```
+
+The Raspberry Pi will appear as a component in the web interface with one output, controllable alongside your TouchDesigner outputs!
+
+See [RpiSimpleNDI/NDI_ROUTER_INTEGRATION.md](../../../RpiSimpleNDI/NDI_ROUTER_INTEGRATION.md) for complete integration guide.
+
 #### Info-Only Clients (Read-Only Mode)
 
 If you want to build a client that only displays information without contributing outputs (like the `NDI_NamedRouter_INFO` component):
