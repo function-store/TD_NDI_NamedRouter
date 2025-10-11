@@ -256,6 +256,80 @@
         .recall-button:hover {
             box-shadow: 0 8px 25px rgba(214, 158, 46, 0.4);
         }
+        
+        .lock-button {
+            background: none;
+            border: 2px solid #718096;
+            color: #718096;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .lock-button:hover {
+            border-color: #a0aec0;
+            color: #a0aec0;
+            transform: scale(1.05);
+        }
+        
+        .lock-button.locked {
+            background: linear-gradient(45deg, #ed8936, #f6ad55);
+            border-color: #dd6b20;
+            color: white;
+        }
+        
+        .lock-button.locked:hover {
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.5);
+        }
+        
+        .block-card.locked {
+            border-color: #ed8936;
+            background: linear-gradient(135deg, #2d3748 0%, #3a4556 100%);
+        }
+        
+        .block-card.locked .block-title::before {
+            content: "🔒 ";
+            color: #f6ad55;
+        }
+        
+        .block-card.locked select {
+            border-color: #ed8936;
+        }
+        
+        .global-lock-button {
+            background: linear-gradient(45deg, #805ad5, #6b46c1);
+            border: 2px solid #805ad5;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 5px 15px rgba(128, 90, 213, 0.3);
+        }
+        
+        .global-lock-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(128, 90, 213, 0.4);
+        }
+        
+        .global-lock-button.locked {
+            background: linear-gradient(45deg, #ed8936, #f6ad55);
+            border-color: #dd6b20;
+        }
+        
+        .global-lock-button.locked:hover {
+            box-shadow: 0 8px 25px rgba(237, 137, 54, 0.5);
+        }
 
         .notification {
             position: fixed;
@@ -374,6 +448,10 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2>Source Controls</h2>
                     <div class="control-buttons">
+                        <button class="global-lock-button" id="globalLockButton" onclick="toggleGlobalLock()">
+                            <span id="globalLockIcon">🔓</span>
+                            <span id="globalLockText">Global Lock</span>
+                        </button>
                         <button class="refresh-button" onclick="refreshSources()">Refresh Sources</button>
                         <button class="refresh-button save-button" onclick="saveConfiguration()">Save Config</button>
                         <button class="refresh-button recall-button" onclick="recallConfiguration()">Recall Config</button>
@@ -530,13 +608,37 @@
                 const currentSource = currentState.current_sources[i] || '';
                 const resolution = currentState.output_resolutions && currentState.output_resolutions[i] ? currentState.output_resolutions[i] : [0, 0];
                 const resolutionText = resolution[0] > 0 && resolution[1] > 0 ? `${resolution[0]} × ${resolution[1]}` : 'Not set';
+                const isIndividuallyLocked = currentState.locks && currentState.locks[i] ? true : false;
+                const isGloballyLocked = currentState.lock_global ? true : false;
+                const isEffectivelyLocked = isGloballyLocked || isIndividuallyLocked;
+                
+                // Determine lock button appearance
+                let lockButtonClass = '';
+                let lockButtonTitle = '';
+                let lockIcon = '🔓';
+                
+                if (isGloballyLocked) {
+                    lockButtonClass = 'locked';
+                    lockIcon = '🔒';
+                    lockButtonTitle = 'Globally locked - unlock Global Lock first';
+                } else if (isIndividuallyLocked) {
+                    lockButtonClass = 'locked';
+                    lockIcon = '🔒';
+                    lockButtonTitle = 'Unlock to enable auto-routing';
+                } else {
+                    lockButtonTitle = 'Lock to disable auto-routing';
+                }
                 
                 html += `
-                    <div class="block-card">
+                    <div class="block-card ${isEffectivelyLocked ? 'locked' : ''}">
                         <div class="block-header">
                             <div class="block-title">${outputName}</div>
-                            <div class="regex-pattern">${regexPattern}</div>
+                            <button class="lock-button ${lockButtonClass}" onclick="toggleLock(${i})" title="${lockButtonTitle}" ${isGloballyLocked ? 'style="opacity: 0.6; cursor: not-allowed;"' : ''}>
+                                ${lockIcon}
+                            </button>
                         </div>
+                        
+                        <div class="regex-pattern">${regexPattern}</div>
                         
                         <div class="resolution-info">
                             <span class="resolution-label">Resolution:</span>
@@ -558,6 +660,22 @@
                         </div>
                     </div>
                 `;
+            }
+            
+            // Update global lock button
+            const globalLockButton = document.getElementById('globalLockButton');
+            const globalLockIcon = document.getElementById('globalLockIcon');
+            const globalLockText = document.getElementById('globalLockText');
+            if (globalLockButton && currentState.lock_global !== undefined) {
+                if (currentState.lock_global) {
+                    globalLockButton.classList.add('locked');
+                    globalLockIcon.textContent = '🔒';
+                    globalLockText.textContent = 'Unlock All';
+                } else {
+                    globalLockButton.classList.remove('locked');
+                    globalLockIcon.textContent = '🔓';
+                    globalLockText.textContent = 'Lock All';
+                }
             }
             
             container.innerHTML = html;
@@ -601,6 +719,43 @@
         function recallConfiguration() {
             console.log('Recalling configuration');
             sendMessage({ action: 'recall_configuration' });
+        }
+        
+        function toggleLock(blockIdx) {
+            console.log(`Toggling lock for block ${blockIdx}`);
+            
+            // Don't allow toggling individual locks when global lock is enabled
+            if (currentState.lock_global) {
+                showNotification('Unlock Global Lock first to change individual locks', 'error');
+                return;
+            }
+            
+            const isCurrentlyLocked = currentState.locks && currentState.locks[blockIdx];
+            const newLockState = !isCurrentlyLocked;
+            
+            sendMessage({ 
+                action: 'set_lock',
+                block_idx: blockIdx,
+                locked: newLockState
+            });
+            
+            const lockStatus = newLockState ? 'locked' : 'unlocked';
+            const outputName = currentState.output_names[blockIdx] || `Block ${blockIdx + 1}`;
+            showNotification(`${outputName} ${lockStatus}`, 'success');
+        }
+        
+        function toggleGlobalLock() {
+            console.log('Toggling global lock');
+            const isCurrentlyLocked = currentState.lock_global;
+            const newLockState = !isCurrentlyLocked;
+            
+            sendMessage({ 
+                action: 'set_lock_global',
+                locked: newLockState
+            });
+            
+            const lockStatus = newLockState ? 'locked' : 'unlocked';
+            showNotification(`All outputs ${lockStatus}`, 'success');
         }
 
         function showNotification(message, type = 'success') {

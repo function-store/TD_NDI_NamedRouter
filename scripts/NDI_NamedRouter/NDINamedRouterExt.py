@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.53.toe
+Saveorigin : NDI_NamedRouter.56.toe
 Saveversion : 2023.11880
 Info Header End'''
 import re
@@ -158,6 +158,15 @@ class NDINamedRouterExt:
 			self.ownerComp.saveExternalTox()
 		project.save()
 
+	def onParLockglobal(self, val):
+		"""Called when global lock parameter changes"""
+		debug(f'Global lock changed to: {val}')
+		# Broadcast state update to web interface
+		if hasattr(self, 'webHandler'):
+			self.webHandler.broadcastStateUpdate()
+
+
+
 	def onParRecallsaved(self):
 		self._recallSavedSources()
 
@@ -172,6 +181,8 @@ class NDINamedRouterExt:
 				'effective_regex_patterns': self.effectiveRegexPatterns,
 				'plural_handling_enabled': self.enablePluralHandling,
 				'output_resolutions': self.outputResolutions,
+				'lock_global': self.ownerComp.par.Lockglobal.eval(),
+				'locks': [block.par.Lock.eval() for block in self.seqSwitch],
 				'last_update': time.time()
 			}
 			return state
@@ -245,18 +256,37 @@ class NDINamedRouterExt:
 			self.webHandler.broadcastSourceChange(idx, val)
 
 	def onSeqSwitchNResx(self, idx, val):
-		debug(f'onSeqSwitchNResx: {idx} {val}')
-		return
+		"""Called when resolution X changes for a block"""
+		debug(f'Resolution X for block {idx} changed to: {val}')
+		# Broadcast state update to web interface
+		if hasattr(self, 'webHandler'):
+			self.webHandler.broadcastStateUpdate()
 	
 	def onSeqSwitchNResy(self, idx, val):
-		debug(f'onSeqSwitchNResy: {idx} {val}')
-		return
+		"""Called when resolution Y changes for a block"""
+		debug(f'Resolution Y for block {idx} changed to: {val}')
+		# Broadcast state update to web interface
+		if hasattr(self, 'webHandler'):
+			self.webHandler.broadcastStateUpdate()
+
+	def onSeqSwitchNLock(self, idx, val):
+		"""Called when individual block lock parameter changes"""
+		debug(f'Lock for block {idx} changed to: {val}')
+		# Broadcast state update to web interface
+		if hasattr(self, 'webHandler'):
+			self.webHandler.broadcastStateUpdate()
 
 	def updateSourceMapping(self, latestSourceName=None):
 		"""Update source mapping based on current sources and regex patterns
 		
 		Note: All regex matching and source name comparisons are case-insensitive
+		Respects lock states - locked outputs won't be automatically updated
 		"""
+		# Check global lock - if enabled, skip all auto-routing
+		if self.ownerComp.par.Lockglobal.eval():
+			debug('Global lock enabled - skipping auto-routing')
+			return
+		
 		sources = self.sources
 		if not isinstance(sources, list):
 			sources = [sources]
@@ -268,6 +298,11 @@ class NDINamedRouterExt:
 			debug(f'Updating only blocks that match latest source: {latestSourceName}')
 			
 			for blockIdx, pattern in enumerate(self.regexPatterns):
+				# Check if this specific block is locked
+				if self.seqSwitch[blockIdx].par.Lock.eval():
+					debug(f'Block {blockIdx} is locked - skipping auto-routing')
+					continue
+				
 				# Apply plural handling transformation if enabled
 				transformedPattern = self.transformPatternForPlurals(pattern)
 				
@@ -291,6 +326,11 @@ class NDINamedRouterExt:
 			# When not using latest source: For each block, if current output matches regex, keep it. Otherwise find a matching one.
 			debug('Updating all blocks based on current state')
 			for blockIdx, pattern in enumerate(self.regexPatterns):
+				# Check if this specific block is locked
+				if self.seqSwitch[blockIdx].par.Lock.eval():
+					debug(f'Block {blockIdx} is locked - skipping auto-routing')
+					continue
+				
 				# this is to prevent overriding a manual source change
 				if self.seqSwitch[blockIdx].par.Currentsource.eval() in sources:
 					debug(f'current source is already in prev sources, nothing to do really')
@@ -554,6 +594,62 @@ class WebHandler:
 						'message': 'Failed to refresh sources'
 					}
 					webSocketDAT.sendText( json.dumps(error_response))
+			
+			elif action == 'set_lock':
+				debug('Processing set_lock action')
+				block_idx = data.get('block_idx')
+				locked = data.get('locked')
+				debug(f'Set lock parameters: block_idx={block_idx}, locked={locked}')
+				
+				if block_idx is not None and locked is not None:
+					if block_idx < len(self.extension.seqSwitch):
+						self.extension.seqSwitch[block_idx].par.Lock.val = locked
+						debug(f'Set lock for block {block_idx}: {locked}')
+						
+						# Send updated state
+						state = self.extension.getCurrentState()
+						response = {
+							'action': 'state_update',
+							'state': state
+						}
+						webSocketDAT.sendText(json.dumps(response))
+						debug('Lock state updated successfully')
+					else:
+						error_response = {
+							'action': 'error',
+							'message': f'Invalid block index: {block_idx}'
+						}
+						webSocketDAT.sendText(json.dumps(error_response))
+				else:
+					error_response = {
+						'action': 'error',
+						'message': 'Invalid set_lock parameters'
+					}
+					webSocketDAT.sendText(json.dumps(error_response))
+			
+			elif action == 'set_lock_global':
+				debug('Processing set_lock_global action')
+				locked = data.get('locked')
+				debug(f'Set global lock: {locked}')
+				
+				if locked is not None:
+					self.extension.ownerComp.par.Lockglobal.val = locked
+					debug(f'Set global lock: {locked}')
+					
+					# Send updated state
+					state = self.extension.getCurrentState()
+					response = {
+						'action': 'state_update',
+						'state': state
+					}
+					webSocketDAT.sendText(json.dumps(response))
+					debug('Global lock state updated successfully')
+				else:
+					error_response = {
+						'action': 'error',
+						'message': 'Invalid set_lock_global parameters'
+					}
+					webSocketDAT.sendText(json.dumps(error_response))
 			
 			elif action == 'save_configuration':
 				debug('Processing save_configuration action')
