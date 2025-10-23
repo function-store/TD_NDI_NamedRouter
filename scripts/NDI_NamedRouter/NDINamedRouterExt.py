@@ -1,8 +1,8 @@
-'''Info Header Start
+﻿'''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.70.toe
-Saveversion : 2023.11880
+Saveorigin : NDI_NamedRouter.74.toe
+Saveversion : 2023.12120
 Info Header End'''
 import re
 import json
@@ -30,6 +30,7 @@ class NDINamedRouterExt:
 		
 		# Store Spout sources (local only, no regex auto-switching)
 		self.spoutSources = []
+		self.previousSpoutSources = []  # Track previous sources to detect new ones
 		
 		# Initialize Spout sources list from DAT
 		self.onSpoutSourcesChanged()
@@ -69,9 +70,10 @@ class NDINamedRouterExt:
 		
 		This method adds 's?' to word endings when plural handling is enabled.
 		It's designed to be conservative and only modify simple word patterns.
+		The closing parenthesis is optional to support both NDI (with parentheses) and Spout (without).
 		"""
 		if not self.enablePluralHandling:
-			return pattern + '\)'
+			return pattern + r'\)?'  # Optional closing parenthesis
 		
 		# Only apply to simple patterns that end with word characters
 		# This avoids breaking complex regex patterns
@@ -80,10 +82,10 @@ class NDINamedRouterExt:
 			# This handles patterns like 'projector' -> 'projectors?'
 			# But leaves patterns like 'projector.*' or 'projectors?' unchanged
 			if re.search(r'[a-zA-Z0-9_]$', pattern) and not pattern.endswith('s?'):
-				transformed = pattern + 's?\)'
+				transformed = pattern + r's?\)?'  # Optional closing parenthesis
 				return transformed
 		
-		return pattern + '\)'
+		return pattern + r'\)?'  # Optional closing parenthesis
 
 	@property#
 	def seqSwitch(self):
@@ -333,6 +335,9 @@ class NDINamedRouterExt:
 			# When latestSourceName is provided: Only update blocks whose regex patterns match this latest source
 			debug(f'Updating only blocks that match latest source: {latestSourceName}')
 			
+			# Get matchable name (strip SPOUT: prefix for pattern matching)
+			matchableName = latestSourceName[6:] if latestSourceName.startswith('SPOUT:') else latestSourceName
+			debug(f'Matchable name: {matchableName}')
 			for blockIdx, pattern in enumerate(self.regexPatterns):
 				# Check if this specific block is locked
 				if self.seqSwitch[blockIdx].par.Lock.eval():
@@ -343,8 +348,8 @@ class NDINamedRouterExt:
 				transformedPattern = self.transformPatternForPlurals(pattern)
 				
 				debug(f'Checking block {blockIdx} with pattern {transformedPattern} for latest source {latestSourceName}')
-				# Check if the latest source matches this block's pattern
-				if re.fullmatch(transformedPattern, latestSourceName, re.IGNORECASE):
+				# Check if the latest source matches this block's pattern (use matchable name without prefix)
+				if re.fullmatch(transformedPattern, matchableName, re.IGNORECASE):
 					debug(f'Latest source {latestSourceName} matches pattern {blockIdx}: {transformedPattern}')
 					
 					# Use the full source name directly
@@ -355,7 +360,9 @@ class NDINamedRouterExt:
 					# Check if current source is still valid for this block (don't change it)
 					currentSource = self.seqSwitch[blockIdx].par.Currentsource.val
 					if currentSource:
-						if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
+						# Strip SPOUT: prefix for pattern matching
+						currentMatchable = currentSource[6:] if currentSource.startswith('SPOUT:') else currentSource
+						if re.fullmatch(transformedPattern, currentMatchable, re.IGNORECASE):
 							matched_idxs.append(blockIdx)
 							debug(f'Block {blockIdx} keeping current source: {currentSource}')
 		else:
@@ -382,7 +389,9 @@ class NDINamedRouterExt:
 				currentStillMatches = False
 				
 				if currentSource:
-					if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
+					# Strip SPOUT: prefix for pattern matching
+					currentMatchable = currentSource[6:] if currentSource.startswith('SPOUT:') else currentSource
+					if re.fullmatch(transformedPattern, currentMatchable, re.IGNORECASE):
 						# Current source still matches, keep it
 						currentStillMatches = True
 						matched_idxs.append(blockIdx)
@@ -394,7 +403,9 @@ class NDINamedRouterExt:
 					
 					# Find first source that matches this pattern
 					for source in sources:
-						if re.fullmatch(transformedPattern, source, re.IGNORECASE):
+						# Strip SPOUT: prefix for pattern matching
+						sourceMatchable = source[6:] if source.startswith('SPOUT:') else source
+						if re.fullmatch(transformedPattern, sourceMatchable, re.IGNORECASE):
 							matchingSource = source
 							debug(f'Source {source} matches pattern {transformedPattern} (case-insensitive)')
 							break
@@ -459,16 +470,29 @@ class NDINamedRouterExt:
 
 
 	def onSpoutSourcesChanged(self, dat = None):
-		"""Called when Spout sources change"""
+		"""Called when Spout sources change - detect appeared/disappeared sources"""
 		if dat is None:
 			dat = self.ownerComp.op('null_spoutsources')
-			
+		if dat.text.strip() == '':
+			return
 		rows = dat.rows()
 		spout_source_names = [row[0].val for row in rows]
-		debug(spout_source_names)
+		debug(f'Spout sources changed: {spout_source_names}')
+		
+		# Detect newly appeared sources (in new list but not in previous)
+		newly_appeared = [name for name in spout_source_names if name not in self.previousSpoutSources]
+		
+		# Detect disappeared sources (in previous but not in new)
+		disappeared = [name for name in self.previousSpoutSources if name not in spout_source_names]
+		
+		if newly_appeared:
+			debug(f'>>>>>>>>>>>>>Spout sources appeared: {newly_appeared}')
+		if disappeared:
+			debug(f'>>>>>>>>>>>>>Spout sources disappeared: {disappeared}')
 		
 		# Update stored Spout sources
 		self.spoutSources = spout_source_names
+		self.previousSpoutSources = spout_source_names.copy()
 		
 		# Update dropdown menus with combined sources
 		combined_sources = self.sources
@@ -476,7 +500,11 @@ class NDINamedRouterExt:
 			block.par.Currentsource.menuLabels = combined_sources
 			block.par.Currentsource.menuNames = combined_sources
 		
-		debug(f'Spout sources updated: {spout_source_names}')
+		# Auto-route newly appeared Spout sources (with SPOUT: prefix for pattern matching)
+		for source_name in newly_appeared:
+			full_source_name = f'SPOUT:{source_name}'
+			debug(f'################################Auto-routing newly appeared Spout source: {full_source_name}')
+			self.updateSourceMapping(full_source_name)
 		
 		# Broadcast state update to web interface
 		if hasattr(self, 'webHandler'):
