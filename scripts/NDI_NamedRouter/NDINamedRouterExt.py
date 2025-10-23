@@ -1,7 +1,7 @@
 ﻿'''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.74.toe
+Saveorigin : NDI_NamedRouter.75.toe
 Saveversion : 2023.12120
 Info Header End'''
 import re
@@ -494,11 +494,17 @@ class NDINamedRouterExt:
 		self.spoutSources = spout_source_names
 		self.previousSpoutSources = spout_source_names.copy()
 		
+		# Save current sources before updating menus (prevents TouchDesigner from changing them)
+		saved_sources = self.currentSources
+		
 		# Update dropdown menus with combined sources
 		combined_sources = self.sources
 		for block in self.seqSwitch:
 			block.par.Currentsource.menuLabels = combined_sources
 			block.par.Currentsource.menuNames = combined_sources
+		
+		# Restore current sources after menu update
+		self.currentSources = saved_sources
 		
 		# Auto-route newly appeared Spout sources (with SPOUT: prefix for pattern matching)
 		for source_name in newly_appeared:
