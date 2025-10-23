@@ -666,13 +666,29 @@
                 
                 // Filter sources: show all network sources + only this component's local-only sources
                 const availableSources = currentState.sources.filter(source => {
-                    // If it's not a local-only source, it's available to everyone
-                    if (!component || !component.local_only_sources) {
+                    // Check if this source is local-only to ANY component
+                    let isLocalOnlyToAnyComponent = false;
+                    let isLocalOnlyToThisComponent = false;
+                    
+                    if (currentState.components) {
+                        for (const comp of currentState.components) {
+                            if (comp.local_only_sources && comp.local_only_sources.includes(source)) {
+                                isLocalOnlyToAnyComponent = true;
+                                if (comp.component_id === component.component_id) {
+                                    isLocalOnlyToThisComponent = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If source is not local-only to anyone, show it (it's a network source)
+                    if (!isLocalOnlyToAnyComponent) {
                         return true;
                     }
-                    // If it's a local-only source, only show it for this component
-                    const isLocalOnly = component.local_only_sources.includes(source);
-                    return !isLocalOnly || isLocalOnly;
+                    
+                    // If source is local-only, only show it if it's local to THIS component
+                    return isLocalOnlyToThisComponent;
                 });
                 
                 html += `

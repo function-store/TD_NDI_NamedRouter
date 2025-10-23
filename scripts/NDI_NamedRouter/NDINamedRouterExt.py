@@ -1,8 +1,8 @@
-'''Info Header Start
+﻿'''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.70.toe
-Saveversion : 2023.11880
+Saveorigin : NDI_NamedRouter.74.toe
+Saveversion : 2023.12120
 Info Header End'''
 import re
 import json
@@ -30,6 +30,11 @@ class NDINamedRouterExt:
 		
 		# Store Spout sources (local only, no regex auto-switching)
 		self.spoutSources = []
+		self.previousSpoutSources = []  # Track previous sources to detect new ones
+		
+		# Track previous source for each block (for smart fallback)
+		self.previousSources = {}  # {blockIdx: previousSourceName}
+		self.currentSourcesTracking = {}  # {blockIdx: currentSourceName} - track current to detect changes
 		
 		# Initialize Spout sources list from DAT
 		self.onSpoutSourcesChanged()
@@ -40,6 +45,12 @@ class NDINamedRouterExt:
 		
 		self.seqSwitch[0].par.Currentsource.menuLabels = self.sources
 		self.seqSwitch[0].par.Currentsource.menuNames = self.sources
+		
+		# Initialize current source tracking
+		for idx, block in enumerate(self.seqSwitch):
+			currentSrc = block.par.Currentsource.eval()
+			if currentSrc:
+				self.currentSourcesTracking[idx] = currentSrc
 
 		debug(f'NDI Named Switcher Extension initialized with {len(self.sources)} sources')
 		debug(f'Plural handling: {"enabled" if self.enablePluralHandling else "disabled"}')
@@ -69,9 +80,10 @@ class NDINamedRouterExt:
 		
 		This method adds 's?' to word endings when plural handling is enabled.
 		It's designed to be conservative and only modify simple word patterns.
+		The closing parenthesis is optional to support both NDI (with parentheses) and Spout (without).
 		"""
 		if not self.enablePluralHandling:
-			return pattern + '\)'
+			return pattern + r'\)?'  # Optional closing parenthesis
 		
 		# Only apply to simple patterns that end with word characters
 		# This avoids breaking complex regex patterns
@@ -80,10 +92,10 @@ class NDINamedRouterExt:
 			# This handles patterns like 'projector' -> 'projectors?'
 			# But leaves patterns like 'projector.*' or 'projectors?' unchanged
 			if re.search(r'[a-zA-Z0-9_]$', pattern) and not pattern.endswith('s?'):
-				transformed = pattern + 's?\)'
+				transformed = pattern + r's?\)?'  # Optional closing parenthesis
 				return transformed
 		
-		return pattern + '\)'
+		return pattern + r'\)?'  # Optional closing parenthesis
 
 	@property#
 	def seqSwitch(self):
@@ -265,6 +277,20 @@ class NDINamedRouterExt:
 	def onSeqSwitchNCurrentsource(self, idx, val):
 		_comp = self.ownerComp.op(f'ndi{idx}')
 		
+		# Save previous source before changing (for smart fallback)
+		# Use tracked value since parameter has already changed when callback runs
+		oldSource = self.currentSourcesTracking.get(idx)
+		debug(f'[TRACKING] Block {idx} source change: "{oldSource}" -> "{val}"')
+		
+		if oldSource and oldSource != val and val:  # Only track if new value is not empty
+			self.previousSources[idx] = oldSource
+			debug(f'[TRACKING] âœ" Saved previous source for block {idx}: {oldSource}')
+		
+		# Update current source tracking
+		if val:
+			self.currentSourcesTracking[idx] = val
+			debug(f'[TRACKING] Current tracking updated for block {idx}: {val}')
+		
 		# Check if this is a Spout source (prefixed with "SPOUT:")
 		if val.startswith('SPOUT:'):
 			# Route to Spout input
@@ -323,7 +349,9 @@ class NDINamedRouterExt:
 			debug('Global lock enabled - skipping auto-routing')
 			return
 		
-		sources = self.sources
+		# Use menu labels instead of self.sources - more reliable during disappear events
+		# because onSourceDisappeared removes from menus immediately
+		sources = list(self.seqSwitch[0].par.Currentsource.menuLabels)
 		if not isinstance(sources, list):
 			sources = [sources]
 		
@@ -333,6 +361,9 @@ class NDINamedRouterExt:
 			# When latestSourceName is provided: Only update blocks whose regex patterns match this latest source
 			debug(f'Updating only blocks that match latest source: {latestSourceName}')
 			
+			# Get matchable name (strip SPOUT: prefix for pattern matching)
+			matchableName = latestSourceName[6:] if latestSourceName.startswith('SPOUT:') else latestSourceName
+			debug(f'Matchable name: {matchableName}')
 			for blockIdx, pattern in enumerate(self.regexPatterns):
 				# Check if this specific block is locked
 				if self.seqSwitch[blockIdx].par.Lock.eval():
@@ -343,8 +374,8 @@ class NDINamedRouterExt:
 				transformedPattern = self.transformPatternForPlurals(pattern)
 				
 				debug(f'Checking block {blockIdx} with pattern {transformedPattern} for latest source {latestSourceName}')
-				# Check if the latest source matches this block's pattern
-				if re.fullmatch(transformedPattern, latestSourceName, re.IGNORECASE):
+				# Check if the latest source matches this block's pattern (use matchable name without prefix)
+				if re.fullmatch(transformedPattern, matchableName, re.IGNORECASE):
 					debug(f'Latest source {latestSourceName} matches pattern {blockIdx}: {transformedPattern}')
 					
 					# Use the full source name directly
@@ -355,7 +386,9 @@ class NDINamedRouterExt:
 					# Check if current source is still valid for this block (don't change it)
 					currentSource = self.seqSwitch[blockIdx].par.Currentsource.val
 					if currentSource:
-						if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
+						# Strip SPOUT: prefix for pattern matching
+						currentMatchable = currentSource[6:] if currentSource.startswith('SPOUT:') else currentSource
+						if re.fullmatch(transformedPattern, currentMatchable, re.IGNORECASE):
 							matched_idxs.append(blockIdx)
 							debug(f'Block {blockIdx} keeping current source: {currentSource}')
 		else:
@@ -367,45 +400,93 @@ class NDINamedRouterExt:
 					debug(f'Block {blockIdx} is locked - skipping auto-routing')
 					continue
 				
-				# this is to prevent overriding a manual source change
-				if self.seqSwitch[blockIdx].par.Currentsource.eval() in sources:
-					debug(f'current source is already in prev sources, nothing to do really')
-					matched_idxs.append(blockIdx)
-					continue
-
-				# Apply plural handling transformation if enabled
+				# Check if current source is still valid AND matches pattern
+				currentSource = self.seqSwitch[blockIdx].par.Currentsource.eval()
+				previousSource = self.previousSources.get(blockIdx)
+				
+				# Apply plural handling transformation for pattern checking
 				transformedPattern = self.transformPatternForPlurals(pattern)
+				
+				if currentSource in sources:
+					# Current source is available - check if it matches the pattern
+					currentMatchable = currentSource[6:] if currentSource.startswith('SPOUT:') else currentSource
+					currentMatchesPattern = re.fullmatch(transformedPattern, currentMatchable, re.IGNORECASE)
+					debug(f'Block {blockIdx}: Current "{currentSource}" (matchable: "{currentMatchable}") vs pattern {transformedPattern} = {currentMatchesPattern}')
+					
+					if currentMatchesPattern:
+						# Current source matches pattern and is available - ALWAYS keep it
+						# We only switch away if the current source disappears or doesn't match pattern
+						debug(f'✓ Current source {currentSource} matches pattern and is valid, keeping it')
+						matched_idxs.append(blockIdx)
+						continue
+					else:
+						# Current source doesn't match pattern - need to find a better one
+						debug(f'✗ Current source {currentSource} is available but does NOT match pattern {transformedPattern} - searching for match')
+						# Don't skip - let the pattern matching logic find a better source
+				else:
+					# Current source not available - need to find replacement
+					debug(f'Current source {currentSource} is NOT available - searching for replacement')
+
+				# Pattern already transformed above
 				debug(f'Checking block {blockIdx} with pattern: {pattern} -> {transformedPattern}')
 				
-				# First check if current source still matches the pattern
-				currentSource = self.seqSwitch[blockIdx].par.Currentsource.val
-				currentStillMatches = False
+				# If we reach here, current source either doesn't exist or doesn't match pattern
+				# Find a new matching source
+				matchingSource = None
 				
-				if currentSource:
-					if re.fullmatch(transformedPattern, currentSource, re.IGNORECASE):
-						# Current source still matches, keep it
-						currentStillMatches = True
-						matched_idxs.append(blockIdx)
-						debug(f'Block {blockIdx} keeping current source: {currentSource} (still matches pattern)')
+				# First, try to fall back to previous source if available
+				# Previous source is valid regardless of pattern (it was manually/auto selected)
+				previousSource = self.previousSources.get(blockIdx)
+				debug(f'Block {blockIdx}: Looking for replacement. Previous source: {previousSource}')
 				
-				# If current source doesn't match, find a new matching source
-				if not currentStillMatches:
-					matchingSource = None
-					
-					# Find first source that matches this pattern
-					for source in sources:
-						if re.fullmatch(transformedPattern, source, re.IGNORECASE):
-							matchingSource = source
-							debug(f'Source {source} matches pattern {transformedPattern} (case-insensitive)')
-							break
-					
-					# Use the matching source if found
-					if matchingSource:
-						self.seqSwitch[blockIdx].par.Currentsource.val = matchingSource
-						matched_idxs.append(blockIdx)
-						debug(f'Updated block {blockIdx} to new matching source: {matchingSource}')
+				if previousSource and previousSource in sources:
+					# Previous source is available - use it regardless of pattern match
+					matchingSource = previousSource
+					prevMatchable = previousSource[6:] if previousSource.startswith('SPOUT:') else previousSource
+					matchesPattern = re.fullmatch(transformedPattern, prevMatchable, re.IGNORECASE)
+					if matchesPattern:
+						debug(f'✓ Falling back to previous source for block {blockIdx}: {previousSource} (matches pattern)')
 					else:
-						debug(f'No sources match pattern {blockIdx}: {transformedPattern}')
+						debug(f'✓ Falling back to previous source for block {blockIdx}: {previousSource} (does NOT match pattern but was previously selected)')
+				elif previousSource:
+					debug(f'✗ Previous source "{previousSource}" not in available sources')
+				
+				# If no previous source available, find all matching sources and use the most recent
+				if not matchingSource:
+					debug(f'Block {blockIdx}: Searching for pattern matches. Pattern: {transformedPattern}')
+					debug(f'Block {blockIdx}: Available sources: {sources}')
+					matchingSources = []
+					for source in sources:
+						# Strip SPOUT: prefix for pattern matching
+						sourceMatchable = source[6:] if source.startswith('SPOUT:') else source
+						matches = re.fullmatch(transformedPattern, sourceMatchable, re.IGNORECASE)
+						debug(f'  Testing "{source}" (matchable: "{sourceMatchable}") → {matches}')
+						if matches:
+							matchingSources.append(source)
+							debug(f'  ✓ Source {source} MATCHES pattern')
+					
+					# Use the last (most recent) matching source
+					if matchingSources:
+						matchingSource = matchingSources[-1]
+						debug(f'✓ Found {len(matchingSources)} matching sources, using most recent: {matchingSource}')
+					else:
+						debug(f'✗ No sources match pattern {transformedPattern}')
+				
+				# Use the matching source if found
+				if matchingSource:
+					self.seqSwitch[blockIdx].par.Currentsource.val = matchingSource
+					matched_idxs.append(blockIdx)
+					debug(f'Updated block {blockIdx} to new matching source: {matchingSource}')
+				else:
+					# No pattern match found - fallback to most recent available source as last resort
+					debug(f'No sources match pattern {blockIdx}: {transformedPattern}')
+					if sources:
+						fallbackSource = sources[-1]  # Use last (most recent) available source
+						self.seqSwitch[blockIdx].par.Currentsource.val = fallbackSource
+						matched_idxs.append(blockIdx)
+						debug(f'⚠ No pattern match - using fallback source for block {blockIdx}: {fallbackSource}')
+					else:
+						debug(f'⚠ No sources available at all for block {blockIdx}')
 		
 		debug(f"Updated source mapping {self.seqSwitch}")
 		if latestSourceName is not None and matched_idxs:
@@ -420,6 +501,10 @@ class NDINamedRouterExt:
 	
 		latestSource = _sources[0].sourceName
 		sources = [_source.sourceName for _source in _sources]
+		
+		# Save current selections before updating menus (TD resets values when menus change)
+		saved_sources = self.currentSources
+		
 		for _source in sources:
 			if _source not in self.seqSwitch[0].par.Currentsource.menuLabels:
 				labels = self.seqSwitch[0].par.Currentsource.menuLabels
@@ -428,6 +513,9 @@ class NDINamedRouterExt:
 				names.append(_source)
 				self.seqSwitch[0].par.Currentsource.menuLabels = labels
 				self.seqSwitch[0].par.Currentsource.menuNames = names
+		
+		# Restore saved selections
+		self.currentSources = saved_sources
 		debug(f'updating menus with {sources} cause they appeared')
 
 		for _source in sources:
@@ -439,36 +527,81 @@ class NDINamedRouterExt:
 
 
 	def onSourceDisappeared(self, dat, sources):
+		# Track which blocks were using the disappeared sources
+		disappeared_sources = [_source.sourceName for _source in sources]
+		affected_blocks = []
+		
+		# Check which blocks are currently using disappeared sources
+		for blockIdx, block in enumerate(self.seqSwitch):
+			currentSource = block.par.Currentsource.val
+			if currentSource in disappeared_sources:
+				affected_blocks.append(blockIdx)
+				debug(f'Block {blockIdx} is using disappeared source: {currentSource}')
+		
+		# Save current selections for UNAFFECTED blocks only
+		saved_sources = self.currentSources.copy()
+		
+		# Remove disappeared sources from menus
+		labels = list(self.seqSwitch[0].par.Currentsource.menuLabels)
+		names = list(self.seqSwitch[0].par.Currentsource.menuNames)
+		
 		for _source in sources:
 			_source = _source.sourceName
-			if _source in self.seqSwitch[0].par.Currentsource.menuLabels:
-				labels = self.seqSwitch[0].par.Currentsource.menuLabels
-				names = self.seqSwitch[0].par.Currentsource.menuNames
-				saved_sources = self.currentSources
+			if _source in labels:
 				labels.remove(_source)
 				names.remove(_source)
-				self.seqSwitch[0].par.Currentsource.menuLabels = labels
-				self.seqSwitch[0].par.Currentsource.menuNames = names
-				self.currentSources = saved_sources
+		
+		# Update menus
+		self.seqSwitch[0].par.Currentsource.menuLabels = labels
+		self.seqSwitch[0].par.Currentsource.menuNames = names
+		
+		# Restore selections for UNAFFECTED blocks only
+		for blockIdx, savedSource in enumerate(saved_sources):
+			if blockIdx not in affected_blocks and savedSource in labels:
+				self.seqSwitch[blockIdx].par.Currentsource.val = savedSource
+		
 		debug(f'updating menus after sources disappeared')
 		
-		# Update source mapping after sources disappeared
-		self.updateSourceMapping()
+		# Only update source mapping if any blocks were actually affected
+		if affected_blocks:
+			debug(f'Affected blocks: {affected_blocks} - triggering source mapping update')
+			self.updateSourceMapping()
+		else:
+			debug(f'No blocks affected by disappeared sources - skipping update')
+			# Still broadcast state update to reflect menu changes
+			if hasattr(self, 'webHandler'):
+				self.webHandler.broadcastStateUpdate()
 		
 		# Note: updateSourceMapping already calls broadcastStateUpdate()
 
 
 	def onSpoutSourcesChanged(self, dat = None):
-		"""Called when Spout sources change"""
+		"""Called when Spout sources change - detect appeared/disappeared sources"""
 		if dat is None:
 			dat = self.ownerComp.op('null_spoutsources')
-			
+		if dat.text.strip() == '':
+			return
 		rows = dat.rows()
 		spout_source_names = [row[0].val for row in rows]
-		debug(spout_source_names)
+		debug(f'Spout sources changed: {spout_source_names}')
+		
+		# Detect newly appeared sources (in new list but not in previous)
+		newly_appeared = [name for name in spout_source_names if name not in self.previousSpoutSources]
+		
+		# Detect disappeared sources (in previous but not in new)
+		disappeared = [name for name in self.previousSpoutSources if name not in spout_source_names]
+		
+		if newly_appeared:
+			debug(f'>>>>>>>>>>>>>Spout sources appeared: {newly_appeared}')
+		if disappeared:
+			debug(f'>>>>>>>>>>>>>Spout sources disappeared: {disappeared}')
 		
 		# Update stored Spout sources
 		self.spoutSources = spout_source_names
+		self.previousSpoutSources = spout_source_names.copy()
+		
+		# Save current selections before updating menus (TD resets values when menus change)
+		saved_sources = self.currentSources
 		
 		# Update dropdown menus with combined sources
 		combined_sources = self.sources
@@ -476,7 +609,14 @@ class NDINamedRouterExt:
 			block.par.Currentsource.menuLabels = combined_sources
 			block.par.Currentsource.menuNames = combined_sources
 		
-		debug(f'Spout sources updated: {spout_source_names}')
+		# Restore saved selections
+		self.currentSources = saved_sources
+		
+		# Auto-route newly appeared Spout sources (with SPOUT: prefix for pattern matching)
+		for source_name in newly_appeared:
+			full_source_name = f'SPOUT:{source_name}'
+			debug(f'################################Auto-routing newly appeared Spout source: {full_source_name}')
+			self.updateSourceMapping(full_source_name)
 		
 		# Broadcast state update to web interface
 		if hasattr(self, 'webHandler'):
