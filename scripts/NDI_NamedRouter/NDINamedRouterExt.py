@@ -1,7 +1,7 @@
 ﻿'''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.75.toe
+Saveorigin : NDI_NamedRouter.76.toe
 Saveversion : 2023.12120
 Info Header End'''
 import re
@@ -24,6 +24,10 @@ class NDINamedRouterExt:
 		
 		# Component identification for multi-instance support
 		self.componentId = self.ownerComp.par.Componentid.eval() if hasattr(self.ownerComp.par, 'Componentid') else self.ownerComp.name
+		
+		# Get machine identifier (for Spout source sharing across components on same machine)
+		import socket
+		self.machineId = socket.gethostname()
 		
 		# Plural handling configuration
 		self.enablePluralHandling = True
@@ -193,6 +197,7 @@ class NDINamedRouterExt:
 			state = {
 				'component_id': self.componentId,
 				'component_name': self.ownerComp.name,
+				'machine_id': self.machineId,  # Hostname for Spout source sharing
 				'sources': self.sources,
 				'local_only_sources': local_only_sources,  # Sources only available on this machine
 				'output_names': self.outputNames,
@@ -592,6 +597,7 @@ class WebHandler:
 		
 		response = {
 			'action': 'source_changed',
+			'component_id': self.extension.componentId,  # Include component_id for proper routing
 			'block_idx': block_idx,
 			'source_name': source_name
 		}
@@ -635,6 +641,14 @@ class WebHandler:
 					'message': 'NDI Named Switcher extension not found'
 				}
 				webSocketDAT.sendText( json.dumps(error_response))
+				return
+			
+			# Check if this message is for this specific component
+			# Commands from the bridge should have component_id set
+			message_component_id = data.get('component_id')
+			if message_component_id and message_component_id != self.extension.componentId:
+				# Message is for another component, ignore it
+				debug(f'Ignoring message for component {message_component_id} (we are {self.extension.componentId})')
 				return
 			
 			if action == 'request_state':

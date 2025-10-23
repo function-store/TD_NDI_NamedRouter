@@ -278,10 +278,11 @@ def merge_component_states():
         merged['components'].append({
             'component_id': component_id,
             'component_name': state.get('component_name', component_id),
+            'machine_id': state.get('machine_id', 'unknown'),  # Hostname for Spout source sharing
             'output_start_idx': len(merged['output_names']),
             'output_count': num_outputs,
             'lock_global': state.get('lock_global', False),
-            'local_only_sources': state.get('local_only_sources', [])  # Spout sources local to this component
+            'local_only_sources': state.get('local_only_sources', [])  # Spout sources local to this machine
         })
         
         # Append all outputs from this component
