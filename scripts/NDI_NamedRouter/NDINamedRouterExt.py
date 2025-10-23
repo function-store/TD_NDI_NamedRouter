@@ -1,7 +1,7 @@
 '''Info Header Start
 Name : NDINamedRouterExt
 Author : Dan@DAN-4090
-Saveorigin : NDI_NamedRouter.58.toe
+Saveorigin : NDI_NamedRouter.70.toe
 Saveversion : 2023.11880
 Info Header End'''
 import re
@@ -27,6 +27,12 @@ class NDINamedRouterExt:
 		
 		# Plural handling configuration
 		self.enablePluralHandling = True
+		
+		# Store Spout sources (local only, no regex auto-switching)
+		self.spoutSources = []
+		
+		# Initialize Spout sources list from DAT
+		self.onSpoutSourcesChanged()
 		
 		# Initialize the WebSocket handler
 		self.webHandler = WebHandler(self)
@@ -107,8 +113,10 @@ class NDINamedRouterExt:
 
 	@property
 	def sources(self):
-		# list comprehension for backwards compatibility
-		return [_cell.val for _cell in self.ndiTable.col('sourceName')[1:]]
+		# Merge NDI sources with prefixed Spout sources
+		ndi_sources = [_cell.val for _cell in self.ndiTable.col('sourceName')[1:]]
+		spout_sources = [f'SPOUT:{name}' for name in self.spoutSources]
+		return ndi_sources + spout_sources
 	
 	@property
 	def currentSources(self):
@@ -177,10 +185,14 @@ class NDINamedRouterExt:
 	def getCurrentState(self):
 		"""Get current state for WebSocket communication"""
 		try:
+			# Mark Spout sources as local-only (not available to remote clients)
+			local_only_sources = [f'SPOUT:{name}' for name in self.spoutSources]
+			
 			state = {
 				'component_id': self.componentId,
 				'component_name': self.ownerComp.name,
 				'sources': self.sources,
+				'local_only_sources': local_only_sources,  # Sources only available on this machine
 				'output_names': self.outputNames,
 				'current_sources': [block.par.Currentsource.val for block in self.seqSwitch],
 				'regex_patterns': self.regexPatterns,
@@ -252,9 +264,27 @@ class NDINamedRouterExt:
 
 	def onSeqSwitchNCurrentsource(self, idx, val):
 		_comp = self.ownerComp.op(f'ndi{idx}')
-		_op = _comp.op('ndiin1')
-		_op.par.name = val
-		#self.seqSwitch[idx].par.Showplaceholder.val = False
+		
+		# Check if this is a Spout source (prefixed with "SPOUT:")
+		if val.startswith('SPOUT:'):
+			# Route to Spout input
+			spout_name = val[6:]  # Remove "SPOUT:" prefix
+			_spout_op = _comp.op('syphonspoutin1')
+			if _spout_op:
+				_spout_op.par.sendername = spout_name
+				_comp.op('switch_ndi_spout').par.index = 1
+				debug(f'Set Spout source for block {idx}: {spout_name}')
+			else:
+				debug(f'WARNING: No spoutin1 operator found in {_comp.name}')
+		else:
+			# Route to NDI input
+			_ndi_op = _comp.op('ndiin1')
+			if _ndi_op:
+				_ndi_op.par.name = val
+				_comp.op('switch_ndi_spout').par.index = 0
+				debug(f'Set NDI source for block {idx}: {val}')
+			else:
+				debug(f'WARNING: No ndiin1 operator found in {_comp.name}')
 		
 		# Notify web clients of source change
 		debug(f'Source changed for block {idx}: {val}')
@@ -426,6 +456,31 @@ class NDINamedRouterExt:
 		self.updateSourceMapping()
 		
 		# Note: updateSourceMapping already calls broadcastStateUpdate()
+
+
+	def onSpoutSourcesChanged(self, dat = None):
+		"""Called when Spout sources change"""
+		if dat is None:
+			dat = self.ownerComp.op('null_spoutsources')
+			
+		rows = dat.rows()
+		spout_source_names = [row[0].val for row in rows]
+		debug(spout_source_names)
+		
+		# Update stored Spout sources
+		self.spoutSources = spout_source_names
+		
+		# Update dropdown menus with combined sources
+		combined_sources = self.sources
+		for block in self.seqSwitch:
+			block.par.Currentsource.menuLabels = combined_sources
+			block.par.Currentsource.menuNames = combined_sources
+		
+		debug(f'Spout sources updated: {spout_source_names}')
+		
+		# Broadcast state update to web interface
+		if hasattr(self, 'webHandler'):
+			self.webHandler.broadcastStateUpdate()
 
 
 	def RefreshSourceMapping(self):

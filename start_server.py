@@ -280,7 +280,8 @@ def merge_component_states():
             'component_name': state.get('component_name', component_id),
             'output_start_idx': len(merged['output_names']),
             'output_count': num_outputs,
-            'lock_global': state.get('lock_global', False)
+            'lock_global': state.get('lock_global', False),
+            'local_only_sources': state.get('local_only_sources', [])  # Spout sources local to this component
         })
         
         # Append all outputs from this component

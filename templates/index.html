@@ -664,6 +664,17 @@
                 const componentId = component ? component.component_id : null;
                 const localBlockIdx = component ? (i - component.output_start_idx) : i;
                 
+                // Filter sources: show all network sources + only this component's local-only sources
+                const availableSources = currentState.sources.filter(source => {
+                    // If it's not a local-only source, it's available to everyone
+                    if (!component || !component.local_only_sources) {
+                        return true;
+                    }
+                    // If it's a local-only source, only show it for this component
+                    const isLocalOnly = component.local_only_sources.includes(source);
+                    return !isLocalOnly || isLocalOnly;
+                });
+                
                 html += `
                     <div class="block-card ${isEffectivelyLocked ? 'locked' : ''}" data-component="${componentId}" data-block="${localBlockIdx}">
                         <div class="block-header">
@@ -681,12 +692,14 @@
                         </div>
                         
                         <div class="source-selector">
-                            <label for="source-${i}">Select NDI Source:</label>
+                            <label for="source-${i}">Select Source:</label>
                             <select id="source-${i}" onchange="setSource(${i}, this.value, '${componentId}', ${localBlockIdx})">
                                 <option value="">-- Select Source --</option>
-                                ${currentState.sources.map(source => 
-                                    `<option value="${source}" ${source === currentSource ? 'selected' : ''}>${source}</option>`
-                                ).join('')}
+                                ${availableSources.map(source => {
+                                    const isLocalOnly = component && component.local_only_sources && component.local_only_sources.includes(source);
+                                    const label = isLocalOnly ? `${source} 📍` : source;
+                                    return `<option value="${source}" ${source === currentSource ? 'selected' : ''}>${label}</option>`;
+                                }).join('')}
                             </select>
                         </div>
                         
